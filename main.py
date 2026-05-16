@@ -8,7 +8,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Faxriyor Odilov tizimi muvaffaqiyatli ishlamoqda!"
+    return "Faxriyor Odilov KIPiA Ensiklopediyasi Tizimi Aktiv!"
 
 def run():
     port = int(os.environ.get("PORT", 8080))
@@ -22,156 +22,248 @@ def keep_alive():
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Boshlang'ich bosh menyu tugmalari
+# --- MENYULAR ---
 def main_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn1 = telebot.types.KeyboardButton("📊 mA ➡️ Foiz (%)")
-    btn2 = telebot.types.KeyboardButton("📈 Foiz (%) ➡️ mA")
-    btn3 = telebot.types.KeyboardButton("🌡️ Pt100 Qarshilik")
-    btn4 = telebot.types.KeyboardButton("🛠️ KIPiA Nosozliklar")
-    btn5 = telebot.types.KeyboardButton("📚 Muallif & Ma'lumot")
-    markup.add(btn1, btn2, btn3, btn4, btn5)
+    markup.add(
+        telebot.types.KeyboardButton("📊 Tok Signallari (mA / %)"),
+        telebot.types.KeyboardButton("🌡️ Harorat (Pt, Termopara)"),
+        telebot.types.KeyboardButton("📐 Universal Shkala (Scaling)"),
+        telebot.types.KeyboardButton("💨 Bosim & Sath (Kalkulyator)"),
+        telebot.types.KeyboardButton("🛠️ KIPiA Metodika & HART"),
+        telebot.types.KeyboardButton("📚 Muallif")
+    )
     return markup
 
-# Ichki bo'limlardan ortga qaytish tugmasi
 def back_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn = telebot.types.KeyboardButton("🔙 Bosh menyuga qaytish")
-    markup.add(btn)
+    markup.add(telebot.types.KeyboardButton("🔙 Bosh menyuga qaytish"))
     return markup
 
-# /start buyrug'i kelganda yoki Ortga qaytilganda
+# --- START VA ORTGA QAYTISH ---
 @bot.message_handler(commands=['start'])
 @bot.message_handler(func=lambda message: message.text == "🔙 Bosh menyuga qaytish")
 def send_welcome(message):
     welcome_text = (
-        "🤖 **KIPiA va Avtomatika Tizimi Professional Boti**\n\n"
-        "👨‍💻 Tizim yaratuvchisi: **Faxriyor Odilov**\n\n"
-        "Kerakli muhandislik bo'limini tanlang:"
+        "🤖 **KIPiA Professional Muhandislik Ensiklopediyasi**\n\n"
+        "👨‍💻 Tizim bosh muallifi: **Faxriyor Odilov**\n"
+        "⚙️ Sektor: Instrumentation & Automation System\n\n"
+        "O'lchov asboblari va hisob-kitoblar bo'limini tanlang:"
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_menu(), parse_mode="Markdown")
 
-# 1-bo'lim: mA dan foizni hisoblash
-@bot.message_handler(func=lambda message: message.text == "📊 mA ➡️ Foiz (%)")
-def ask_ma(message):
-    msg = bot.send_message(
-        message.chat.id, 
-        "📥 Tok signalini kiriting (4 va 20 mA oralig'ida):\n*Masalan: 12 yoki 15.4*", 
-        reply_markup=back_menu(),
-        parse_mode="Markdown"
-    )
-    bot.register_next_step_handler(msg, calc_ma_to_percent)
+# --- 1-BO'LIM: TOK SIGNALLARI MENYUSI ---
+@bot.message_handler(func=lambda message: message.text == "📊 Tok Signallari (mA / %)")
+def tok_menu(message):
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("➡️ mA dan Foizga (%)", "➡️ Foizdan (%) mA ga", "🔙 Bosh menyuga qaytish")
+    bot.send_message(message.chat.id, "📊 Tok signali yo'nalishini tanlang:", reply_markup=markup)
 
-def calc_ma_to_percent(message):
-    text = message.text.strip()
-    if text == "🔙 Bosh menyuga qaytish":
-        send_welcome(message)
-        return
+@bot.message_handler(func=lambda message: message.text == "➡️ mA dan Foizga (%)")
+def ask_ma(message):
+    msg = bot.send_message(message.chat.id, "📥 Tok signalini kiriting (4-20 mA):\n*Masalan: 12 yoki 16.5*", reply_markup=back_menu(), parse_mode="Markdown")
+    bot.register_next_step_handler(msg, calc_ma_to_pc)
+
+def calc_ma_to_pc(message):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
     try:
-        val = float(text.replace(',', '.'))
+        val = float(message.text.strip().replace(',', '.'))
         if 4 <= val <= 20:
             pct = (val - 4) / 16 * 100
             bars = int(round(pct / 10))
             bar_str = "🟩" * bars + "⬜" * (10 - bars)
-            res = f"📊 Kiritilgan: *{val} mA*\n📈 Natija: *{pct:.2f}%*\n💻 Shkala: [{bar_str}]"
-            bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"📊 Signal: *{val} mA*\n📈 Natija: *{pct:.2f}%*\n💻 Shkala: [{bar_str}]", reply_markup=back_menu(), parse_mode="Markdown")
         else:
-            msg = bot.send_message(message.chat.id, "⚠️ Xato! Faqat 4 va 20 mA oralig'ida kiriting:", reply_markup=back_menu())
-            bot.register_next_step_handler(msg, calc_ma_to_percent)
-    except ValueError:
-        msg = bot.send_message(message.chat.id, "⚠️ Shunchaki raqam kiriting:", reply_markup=back_menu())
-        bot.register_next_step_handler(msg, calc_ma_to_percent)
+            msg = bot.send_message(message.chat.id, "⚠️ Faqat 4 va 20 mA oralig'ida kiriting:", reply_markup=back_menu())
+            bot.register_next_step_handler(msg, calc_ma_to_pc)
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ Raqam kiriting:", reply_markup=back_menu())
+        bot.register_next_step_handler(msg, calc_ma_to_pc)
 
-# 2-bo'lim: Foizdan mA hisoblash
-@bot.message_handler(func=lambda message: message.text == "📈 Foiz (%) ➡️ mA")
-def ask_percent(message):
-    msg = bot.send_message(
-        message.chat.id, 
-        "📥 Foiz qiymatini kiriting (0 va 100 oralig'ida):\n*Masalan: 50 yoki 82.5*", 
-        reply_markup=back_menu(),
-        parse_mode="Markdown"
-    )
-    bot.register_next_step_handler(msg, calc_percent_to_ma)
+@bot.message_handler(func=lambda message: message.text == "➡️ Foizdan (%) mA ga")
+def ask_pc(message):
+    msg = bot.send_message(message.chat.id, "📥 Foizni kiriting (0-100%):\n*Masalan: 50 yoki 75*", reply_markup=back_menu(), parse_mode="Markdown")
+    bot.register_next_step_handler(msg, calc_pc_to_ma)
 
-def calc_percent_to_ma(message):
-    text = message.text.strip()
-    if text == "🔙 Bosh menyuga qaytish":
-        send_welcome(message)
-        return
+def calc_pc_to_ma(message):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
     try:
-        val = float(text.replace(',', '.'))
+        val = float(message.text.strip().replace(',', '.'))
         if 0 <= val <= 100:
             ma = (val / 100 * 16) + 4
-            res = f"📈 Kiritilgan: *{val}%*\n📊 Kerakli signal: *{ma:.3f} mA*"
-            bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"📈 Kiritilgan: *{val}%*\n📊 Tok signali: *{ma:.3f} mA*", reply_markup=back_menu(), parse_mode="Markdown")
         else:
-            msg = bot.send_message(message.chat.id, "⚠️ Xato! Faqat 0 va 100 oralig'ida kiriting:", reply_markup=back_menu())
-            bot.register_next_step_handler(msg, calc_percent_to_ma)
-    except ValueError:
-        msg = bot.send_message(message.chat.id, "⚠️ Shunchaki raqam kiriting:", reply_markup=back_menu())
-        bot.register_next_step_handler(msg, calc_percent_to_ma)
+            msg = bot.send_message(message.chat.id, "⚠️ Faqat 0 va 100 oralig'ida kiriting:", reply_markup=back_menu())
+            bot.register_next_step_handler(msg, calc_pc_to_ma)
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ Raqam kiriting:", reply_markup=back_menu())
+        bot.register_next_step_handler(msg, calc_pc_to_ma)
 
-# 3-bo'lim: Pt100 Qarshilik hisoblash (RTD Standart)
-@bot.message_handler(func=lambda message: message.text == "🌡️ Pt100 Qarshilik")
-def ask_temp(message):
+# --- 2-BO'LIM: HARORAT MENYUSI ---
+@bot.message_handler(func=lambda message: message.text == "🌡️ Harorat (Pt, Termopara)")
+def temp_menu(message):
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("🌡️ Pt100 Om", "🌡️ Pt1000 Om", "🔥 K-Turi Termopara (mV)", "🔙 Bosh menyuga qaytish")
+    bot.send_message(message.chat.id, "🌡️ Datchik turini tanlang:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text in ["🌡️ Pt100 Om", "🌡️ Pt1000 Om", "🔥 K-Turi Termopara (mV)"])
+def ask_temp_val(message):
+    d_type = message.text
+    msg = bot.send_message(message.chat.id, f"📥 Harorat qiymatini kiriting (°C):\n*Masalan: 25 yoki 150*", reply_markup=back_menu(), parse_mode="Markdown")
+    bot.register_next_step_handler(msg, lambda m: calc_temperature(m, d_type))
+
+def calc_temperature(message, d_type):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
+    try:
+        t = float(message.text.strip().replace(',', '.'))
+        if d_type == "🌡️ Pt100 Om":
+            r = 100 * (1 + 0.0039083 * t)
+            res = f"🌡️ Pt100 datchigi\n🟢 Harorat: *{t} °C*\n🔌 Qarshilik: *{r:.2f} Om (Ω)*"
+        elif d_type == "🌡️ Pt1000 Om":
+            r = 1000 * (1 + 0.0039083 * t)
+            res = f"🌡️ Pt1000 datchigi\n🟢 Harorat: *{t} °C*\n🔌 Qarshilik: *{r:.2f} Om (Ω)*"
+        else:
+            # K-turi termopara uchun soddalashtirilgan muhandislik koeffitsiyenti (~41 uV/°C)
+            mv = t * 0.0412
+            res = f"🔥 K-Type Termopara\n🟢 Harorat: *{t} °C*\n⚡ Chiqish signali: *{mv:.3f} mV*"
+        bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ To'g'ri raqam kiriting:", reply_markup=back_menu())
+        bot.register_next_step_handler(msg, lambda m: calc_temperature(m, d_type))
+
+# --- 3-BO'LIM: UNIVERSAL SCALING ---
+@bot.message_handler(func=lambda message: message.text == "📐 Universal Shkala (Scaling)")
+def ask_scale_setup(message):
     msg = bot.send_message(
         message.chat.id, 
-        "📥 Haroratni kiriting (°C):\n*Masalan: 0, 25 yoki 120*", 
-        reply_markup=back_menu(),
-        parse_mode="Markdown"
+        "📐 **Universal Shkala Kalkulyatori**\n\n"
+        "Datchik diapazoni va joriy mA ni kiriting.\n"
+        "Format: `Format: Min_Shkala Max_Shkala Joriy_mA`\n"
+        "*Misol (0 dan 16 bargacha datchikda 12 mA bo'lsa):*\n`0 16 12`", 
+        reply_markup=back_menu(), parse_mode="Markdown"
     )
-    bot.register_next_step_handler(msg, calc_pt100)
+    bot.register_next_step_handler(msg, calc_universal_scaling)
 
-def calc_pt100(message):
-    text = message.text.strip()
-    if text == "🔙 Bosh menyuga qaytish":
-        send_welcome(message)
-        return
+def calc_universal_scaling(message):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
     try:
-        t = float(text.replace(',', '.'))
-        # Pt100 uchun standart Callendar-Van Dusen soddalashtirilgan formulasi (A=3.9083e-3)
-        r = 100 * (1 + 0.0039083 * t)
-        res = f"🌡️ Harorat: *{t} °C*\n🔌 Pt100 qarshiligi: *{r:.2f} Om (Ω)*"
+        parts = message.text.strip().split()
+        if len(parts) == 3:
+            lrv = float(parts[0].replace(',', '.'))
+            urv = float(parts[1].replace(',', '.'))
+            ma = float(parts[2].replace(',', '.'))
+            if 4 <= ma <= 20:
+                result = lrv + ((ma - 4) / 16) * (urv - lrv)
+                res = (
+                    f"📐 **Scaling Natijasi:**\n\n"
+                    f"🔹 Diapazon: *{lrv} - {urv}*\n"
+                    f"🔹 O'lchangan signal: *{ma} mA*\n"
+                    f"🟢 Liniyadagi Fizik Qiymat: **{result:.3f}**"
+                )
+                bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
+            else:
+                msg = bot.send_message(message.chat.id, "⚠️ mA qiymati 4 va 20 oralig'ida bo'lishi shart. Qayta kiriting:", reply_markup=back_menu())
+                bot.register_next_step_handler(msg, calc_universal_scaling)
+        else:
+            msg = bot.send_message(message.chat.id, "⚠️ Iltimos namunadagidek oralarida bo'shliq bilan 3 ta raqam kiriting (Masalan: `0 16 12`):", reply_markup=back_menu(), parse_mode="Markdown")
+            bot.register_next_step_handler(msg, calc_universal_scaling)
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ Ma'lumot xato kiritildi. Qayta urinib ko'ring:", reply_markup=back_menu())
+        bot.register_next_step_handler(msg, calc_universal_scaling)
+
+# --- 4-BO'LIM: BOSIM VA SATH ---
+@bot.message_handler(func=lambda message: message.text == "💨 Bosim & Sath (Kalkulyator)")
+def pressure_menu(message):
+    markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
+    markup.add("➡️ Bosim Birliklari", "🌊 Gidrostatik Sath (kPa)", "🔙 Bosh menyuga qaytish")
+    bot.send_message(message.chat.id, "💨 Kerakli xizmatni tanlang:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text == "➡️ Bosim Birliklari")
+def ask_press_conv(message):
+    msg = bot.send_message(message.chat.id, "📥 Qiymatni `bar` hisobida kiriting (Masalan: `6` yoki `2.5`):", reply_markup=back_menu())
+    bot.register_next_step_handler(msg, calc_pressure_conversion)
+
+def calc_pressure_conversion(message):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
+    try:
+        bar = float(message.text.strip().replace(',', '.'))
+        kpa = bar * 100
+        mpa = bar * 0.1
+        kgf = bar * 1.01972
+        psi = bar * 14.5038
+        res = (
+            f"💨 **{bar} bar** bosim konvertatsiyasi:\n\n"
+            f"🔹 *{kpa:.2f}* kPa\n"
+            f"🔹 *{mpa:.4f}* MPa\n"
+            f"🔹 *{kgf:.3f}* kgf/cm²\n"
+            f"🔹 *{psi:.2f}* PSI"
+        )
         bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
-    except ValueError:
-        msg = bot.send_message(message.chat.id, "⚠️ Shunchaki raqam kiriting:", reply_markup=back_menu())
-        bot.register_next_step_handler(msg, calc_pt100)
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ Faqat raqam kiriting:", reply_markup=back_menu())
+        bot.register_next_step_handler(msg, calc_pressure_conversion)
 
-# 4-bo'lim: KIPiA Nosozliklar
-@bot.message_handler(func=lambda message: message.text == "🛠️ KIPiA Nosozliklar")
-def troubleshooting(message):
-    guide = (
-        "🛠️ **KIPiA Tezkor Yo'riqnomasi (Troubleshooting):**\n\n"
-        "🛑 **1. Signal 0 mA (Tok yo'q):**\n"
-        "• Datchikka 24V DC kelayotganini tekshiring.\n"
-        "• Tok zanjirida uzilish bor-yo'qligini tester bilan tekshiring.\n\n"
-        "⚡ **2. Signal 24 mA dan yuqori (Overload):**\n"
-        "• Datchik platasi qisqa tutashuv bo'lgan yoki datchik element darsligidan chiqqan (Parchalanish).\n"
-        "• Tozalab qayta kalibrlash (Zero/Span) talab etiladi.\n\n"
-        "📉 **3. Signal o'ynab turishi (Instability):**\n"
-        "• Ekranlangan kabelni (Shield) erga (Ground) to'g'ri ulanganini tekshiring.\n"
-        "• Signal liniyasi kuchli kuchlanish kabellari yonidan o'tmaganiga ishonch hosil qiling."
+@bot.message_handler(func=lambda message: message.text == "🌊 Gidrostatik Sath (kPa)")
+def ask_hydrostatic(message):
+    msg = bot.send_message(
+        message.chat.id, 
+        "🌊 **Gidrostatik Sathni Hisoblash (P = ρ * g * h)**\n\n"
+        "Suyuqlik balandligi (metrda) va zichligini (kg/m³) kiriting.\n"
+        "Format: `Balandlik Zichlik`\n"
+        "*Masalan (5 metr balandlikdagi toza suv bo'lsa):*\n`5 1000`", 
+        reply_markup=back_menu(), parse_mode="Markdown"
     )
-    bot.send_message(message.chat.id, guide, reply_markup=back_menu(), parse_mode="Markdown")
+    bot.register_next_step_handler(msg, calc_hydrostatic)
 
-# 5-bo'lim: Mualliflik va Ma'lumotnoma bo'limi
-@bot.message_handler(func=lambda message: message.text == "📚 Muallif & Ma'lumot")
-def info_author(message):
-    info_text = (
-        "🚀 **KIPiA Professional Yordamchi Tizimi**\n\n"
-        "👨‍💻 **Dasturchi va Muallif:** Faxriyor Odilov\n"
-        "⚙️ **Mutaxassislik:** Instrumentation & Industrial Automation Specialist\n"
+def calc_hydrostatic(message):
+    if message.text == "🔙 Bosh menyuga qaytish": send_welcome(message); return
+    try:
+        parts = message.text.strip().split()
+        h = float(parts[0].replace(',', '.'))
+        rho = float(parts[1].replace(',', '.'))
+        p_pa = rho * 9.80665 * h
+        p_kpa = p_pa / 1000
+        p_bar = p_kpa / 100
+        res = (
+            f"🌊 **Gidrostatik Hisob Kitob:**\n\n"
+            f"🔹 Suyuqlik ustuni: *{h} m*\n"
+            f"🔹 Zichlik: *{rho} kg/m³*\n\n"
+            f"🟢 Datchik darsligidagi bosim:\n"
+            f"⚡ **{p_kpa:.3f} kPa**\n"
+            f"⚡ **{p_bar:.3f} bar**"
+        )
+        bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
+    except:
+        msg = bot.send_message(message.chat.id, "⚠️ Format xato. Misoldagidek kiriting (`5 1000`):", reply_markup=back_menu(), parse_mode="Markdown")
+        bot.register_next_step_handler(msg, calc_hydrostatic)
+
+# --- 5-BO'LIM: KIPiA METODIKA & HART ---
+@bot.message_handler(func=lambda message: message.text == "🛠️ KIPiA Metodika & HART")
+def methodology_menu(message):
+    text = (
+        "🛠️ **KIPiA Muhandislik Qo'llanmasi:**\n\n"
+        "ℹ️ **HART-Kommunikator Instruksiya:**\n"
+        "1. **Online -> PV -> Diapazon sozlash:** Yangi datchik o'rnatilganda `LRV` (0%) va `URV` (100%) qiymatlarini zavod texnologik rejimiga moslang.\n"
+        "2. **Zero Trim (Nollash):** Liniyada bosim mutlaqo yo'q bo'lganda datchik xatolik ko'rsatsa, HART orqali *Sensor Trim -> Zero Trim* bosing.\n"
+        "3. **Polling Address:** Agar datchik DCS (AsuTP) tizimiga ko'p nuqtali (Multidrop) ulanayotgan bo'lsa, adresni 0 dan boshqa raqamga o'zgartiring.\n\n"
+        "🛑 **Tezkor nosozlik bartaraf etish:**\n"
+        "• **4 mA dan past signal:** Zanjirda qayerdadir qarshilik yuqori yoki datchik elementi shikastlangan.\n"
+        "• **20.8 mA dan yuqori / 24 mA:** Tizim to'yingan (Overload) yoki datchik darsligida kuchli parchalanish / avariya yuz bergan."
+    )
+    bot.send_message(message.chat.id, text, reply_markup=back_menu(), parse_mode="Markdown")
+
+# --- 6-BO'LIM: MUALLIF ---
+@bot.message_handler(func=lambda message: message.text == "📚 Muallif")
+def show_author(message):
+    author_text = (
+        "🚀 **KIPiA Professional Intelligent System**\n\n"
+        "👨‍💻 **Dasturchi va G'oya Muallifi:** Faxriyor Odilov\n"
+        "⚙️ **Yo'nalish:** Instrumentation, Metrology & Automation Specialist\n"
         "📍 **Hudud:** Kokand\n\n"
-        "📚 **Standart eslatmalar:**\n"
-        "• 4 mA = 0%\n"
-        "• 12 mA = 50%\n"
-        "• 20 mA = 100%\n"
-        "• Pt100 datchigi 0°C da aniq 100 Om berishi shart."
+        "Tizim eng zamonaviy standartlar asosida avtomatika ustalari va muhandislarining og'irini yengil qilish uchun ishlab chiqildi."
     )
-    bot.send_message(message.chat.id, info_text, reply_markup=back_menu(), parse_mode="Markdown")
+    bot.send_message(message.chat.id, author_text, reply_markup=back_menu(), parse_mode="Markdown")
 
 if __name__ == "__main__":
     keep_alive()
-    print("Bot Faxriyor Odilov tomonidan muvaffaqiyatli yoqildi!")
     bot.infinity_polling(timeout=10, long_polling_timeout=5)
-
