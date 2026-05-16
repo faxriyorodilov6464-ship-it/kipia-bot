@@ -20,7 +20,7 @@ def keep_alive():
     t.start()
 
 # 2. TELEGRAM BOT QISMI
-BOT_TOKEN = "7290547076:AAEqXh_H_7rI2j8oUnU-8Z_S3GZ5WbFpYvM"  
+BOT_TOKEN = "8896826475:AAECGY1ytc0C7deJLIetYsIo418yprnbahg"  
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # Boshlang'ich menyu tugmalari
