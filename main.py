@@ -1,6 +1,7 @@
 import os
 import math
 import telebot
+import pandas as pd
 from flask import Flask
 from threading import Thread
 
@@ -23,6 +24,34 @@ def keep_alive():
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# 3. EXCEL FAYLNI O'QISH VA XOTIRAGA YUKLASH
+EXCEL_FILE = "datchiklar.xlsx"
+datchiklar_baza = {}
+
+def load_excel_data():
+    global datchiklar_baza
+    if os.path.exists(EXCEL_FILE):
+        try:
+            df = pd.read_excel(EXCEL_FILE)
+            df.columns = [str(c).strip().upper() for c in df.columns]
+            
+            for index, row in df.iterrows():
+                tag = str(row.get('DCS TAG', row.get('DCS_TAG', ''))).strip().upper()
+                if tag and tag != 'NAN' and not tag.startswith('SPARE'):
+                    datchiklar_baza[tag] = {
+                        "desc": str(row.get('DESCRIPTION', 'Ma\'lumot yo\'q')).strip(),
+                        "cabinet": str(row.get('FTB CABINET', row.get('RP CABINET FIELD', 'Ma\'lumot yo\'q'))).strip(),
+                        "jb": str(row.get('FTB NAME', row.get('RP TB NO FIELD', 'Ma\'lumot yo\'q'))).strip(),
+                        "terminals": f"{str(row.get('FTB1', '-'))} / {str(row.get('FTB2', '-'))}"
+                    }
+            print(f"✅ Baza tayyor! {len(datchiklar_baza)} ta datchik yuklandi.")
+        except Exception as e:
+            print(f"❌ Excel o'qishda xato: {e}")
+    else:
+        print("⚠️ 'datchiklar.xlsx' fayli topilmadi!")
+
+load_excel_data()
+
 # --- MENYULAR ---
 def main_menu():
     markup = telebot.types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
@@ -42,16 +71,17 @@ def back_menu():
     markup.add(telebot.types.KeyboardButton("Bosh menyuga qaytish"))
     return markup
 
-# --- START VA ORTGA QAYTISH ---
+# --- START VA RESET ---
 @bot.message_handler(commands=['start', 'stop'])
 @bot.message_handler(func=lambda message: message.text == "Bosh menyuga qaytish")
 def send_welcome(message):
-    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id) # Tiqilib qolishni tozalash xavfsizligi
+    bot.clear_step_handler_by_chat_id(chat_id=message.chat.id)
     welcome_text = (
         "🤖 **KIPiA Professional Engineering Encyclopedia**\n\n"
         "👨‍💻 Tizim bosh muallifi: **Faxriyor Odilov**\n"
         "⚙️ Sektor: Instrumentation & Automation System\n\n"
-        "O'lchov asboblari va hisob-kitoblar bo'limini tanlang:"
+        "Kalkulyatorlar uchun pastdagi menyudan foydalaning.\n"
+        "🔍 **Datchik ma'lumotlarini qidirish uchun** uning DCS TAG raqamini yozib yuboring (Masalan: `21_TI_201`):"
     )
     bot.send_message(message.chat.id, welcome_text, reply_markup=main_menu(), parse_mode="Markdown")
 
@@ -276,7 +306,7 @@ def calc_flow_ma(message):
             )
             bot.send_message(message.chat.id, res, reply_markup=back_menu(), parse_mode="Markdown")
         else:
-            msg = bot.send_message(message.chat.id, "⚠️ Joriy oqim maksimal shkaladan katta bo'lishi mumkin emas. Qayta kiriting:", reply_markup=back_menu())
+            msg = bot.send_message(message.chat.id, "⚠️ Joriy oqim maksimal shkaladan katta bo'lishi emot. Qayta kiriting:", reply_markup=back_menu())
             bot.register_next_step_handler(msg, calc_flow_ma)
     except:
         send_welcome(message)
@@ -342,6 +372,29 @@ def show_author(message):
         "Tizim eng zamonaviy standartlar asosida avtomatika ustalari va muhandislarining og'irini yengil qilish uchun ishlab chiqildi."
     )
     bot.send_message(message.chat.id, author_text, reply_markup=back_menu(), parse_mode="Markdown")
+
+# --- TEXT QIDIRUV (EXCEL) TIZIMI ---
+@bot.message_handler(func=lambda message: True)
+def search_tag_from_excel(message):
+    user_text = message.text.strip().replace(' ', '_').upper()
+    
+    if user_text in datchiklar_baza:
+        d = datchiklar_baza[user_text]
+        response_text = (
+            f"🔍 **Datchik topildi: {user_text}**\n\n"
+            f"📝 **Vazifasi (Description):** {d['desc']}\n"
+            f"🖥️ **Kros Panel / Cabinet:** `{d['cabinet']}`\n"
+            f"📦 **JB (Junction Box) / TB Blok:** `{d['jb']}`\n"
+            f"🔌 **Ulanish klemalari:** `{d['terminals']}`"
+        )
+        bot.send_message(message.chat.id, response_text, reply_markup=main_menu(), parse_mode="Markdown")
+    else:
+        bot.send_message(
+            message.chat.id, 
+            "⚠️ Kiritilgan Tag tizimda topilmadi.\n"
+            "Iltimos, datchik nomini to'g'ri kiriting (Masalan: `21_TI_201`) yoki pastdagi kalkulyator tugmalaridan foydalaning.",
+            reply_markup=main_menu()
+        )
 
 if __name__ == "__main__":
     keep_alive()
