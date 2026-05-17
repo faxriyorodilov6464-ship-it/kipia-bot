@@ -24,7 +24,7 @@ def keep_alive():
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 3. EXCEL FAYLNI O'QISH (BARCHA VAROQLARNI AYLANISH)
+# 3. EXCEL FAYLNI O'QISH (SUPER UNIVERSAL VARIANT)
 EXCEL_FILE = "datchiklar.xlsx"
 datchiklar_baza = {}
 
@@ -32,31 +32,68 @@ def load_excel_data():
     global datchiklar_baza
     if os.path.exists(EXCEL_FILE):
         try:
-            # sheet_name=None — bu hamma varaqlarni birdaniga o'qiydi
             excel_sheets = pd.read_excel(EXCEL_FILE, sheet_name=None)
-            datchiklar_baza.clear() # Bazani tozalab olamiz
+            datchiklar_baza.clear()
             
             for sheet_name, df in excel_sheets.items():
-                # Ustun nomlarini katta harf qilib tozalaymiz
+                # Ustun nomlarini katta harf qilib, ortiqcha joylarni o'chiramiz
                 df.columns = [str(c).strip().upper() for c in df.columns]
                 
+                # Biz qidiradigan barcha mumkin bo'lgan ustun nomlari kombinatsiyasi:
+                tag_cols = ['DCS TAG', 'DCS_TAG', 'TAG', 'TAG NO', 'TAG_NO', 'DATCHIK', 'INSTRUMENT TAG']
+                desc_cols = ['DESCRIPTION', 'VAZIFASI', 'NOMI', 'ОПИСАНИЕ']
+                cab_cols = ['FTB CABINET', 'RP CABINET FIELD', 'CABINET', 'SHKAF', 'КРОСС', 'MARSHALLING CABINET']
+                jb_cols = ['FTB NAME', 'RP TB NO FIELD', 'JB', 'JB NO', 'JUNCTION BOX', 'КОРОБКА']
+                
                 for index, row in df.iterrows():
-                    # Jadvalingizdagi ustun nomlarini tekshiramiz
-                    tag = str(row.get('DCS TAG', row.get('DCS_TAG', ''))).strip().upper()
-                    if tag and tag != 'NAN' and not tag.startswith('SPARE'):
-                        datchiklar_baza[tag] = {
-                            "desc": str(row.get('DESCRIPTION', 'Ma\'lumot yo\'q')).strip(),
-                            "cabinet": str(row.get('FTB CABINET', row.get('RP CABINET FIELD', 'Ma\'lumot yo\'q'))).strip(),
-                            "jb": str(row.get('FTB NAME', row.get('RP TB NO FIELD', 'Ma\'lumot yo\'q'))).strip(),
-                            "terminals": f"{str(row.get('FTB1', '-'))} / {str(row.get('FTB2', '-'))}"
+                    # Dinamik ravishda birinchi to'g'ri kelgan ustunni tanlaymiz
+                    tag_val = None
+                    for c in tag_cols:
+                        if c in df.columns and pd.notna(row[c]):
+                            tag_val = str(row[c]).strip().upper()
+                            break
+                    
+                    if tag_val and tag_val != 'NAN' and not tag_val.startswith('SPARE'):
+                        
+                        # Description (Vazifasi) topish
+                        desc_val = "Ma'lumot yo'q"
+                        for c in desc_cols:
+                            if c in df.columns and pd.notna(row[c]):
+                                desc_val = str(row[c]).strip()
+                                break
+                        
+                        # Cabinet (Kros paneli) topish
+                        cab_val = "Ma'lumot yo'q"
+                        for c in cab_cols:
+                            if c in df.columns and pd.notna(row[c]):
+                                cab_val = str(row[c]).strip()
+                                break
+                        
+                        # JB (Junction Box) topish
+                        jb_val = "Ma'lumot yo'q"
+                        for c in jb_cols:
+                            if c in df.columns and pd.notna(row[c]):
+                                jb_val = str(row[c]).strip()
+                                break
+                        
+                        # Klemalar (FTB1 va FTB2 yoki nima bo'lsa ham)
+                        t1 = str(row.get('FTB1', row.get('TB1', '-')))
+                        t2 = str(row.get('FTB2', row.get('TB2', '-')))
+                        terminals_val = f"{t1} / {t2}" if t1 != 'nan' and t2 != 'nan' else "-"
+                        
+                        # Bazaga yuklaymiz
+                        datchiklar_baza[tag_val] = {
+                            "desc": desc_val,
+                            "cabinet": cab_val,
+                            "jb": jb_val,
+                            "terminals": terminals_val
                         }
-            print(f"✅ Baza to'liq yangilandi! Jami {len(datchiklar_baza)} ta datchik barcha varaqlardan yuklandi.")
+            print(f"✅ Baza to'liq tayyor! {len(datchiklar_baza)} ta datchik barcha kombinatsiyalarda yuklandi.")
         except Exception as e:
             print(f"❌ Excel o'qishda xato: {e}")
     else:
         print("⚠️ 'datchiklar.xlsx' fayli topilmadi!")
 
-# Bazani ishga tushiramiz
 load_excel_data()
 
 # --- MENYULAR ---
@@ -380,7 +417,7 @@ def show_author(message):
     )
     bot.send_message(message.chat.id, author_text, reply_markup=back_menu(), parse_mode="Markdown")
 
-# --- MUTLAQO YANGI: BARCHA VAROQLARDAN TAG QIDIRISH TIZIMI ---
+# --- SMART QIDIRUV (HAMMA USTUN VA REGISTR FILTRI) ---
 @bot.message_handler(func=lambda message: True)
 def search_tag_from_excel(message):
     user_text = message.text.strip().replace(' ', '_').upper()
@@ -399,7 +436,7 @@ def search_tag_from_excel(message):
         bot.send_message(
             message.chat.id, 
             "⚠️ Kiritilgan Tag tizimda topilmadi.\n"
-            "Iltimos, datchik nomini to'g'ri kiriting (Masalan: `21_TI_201`) yoki pastdagi kalkulyator tugmalaridan foydalaning.",
+            "Iltimos, datchik nomini to'g'ri kiriting (Masalan: `21_TI_201` yoki `276_LI_42`) yoki pastdagi kalkulyator tugmalaridan foydalaning.",
             reply_markup=main_menu()
         )
 
