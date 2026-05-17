@@ -24,7 +24,7 @@ def keep_alive():
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# 3. EXCEL FAYLNI O'QISH VA XOTIRAGA YUKLASH
+# 3. EXCEL FAYLNI O'QISH (BARCHA VAROQLARNI AYLANISH)
 EXCEL_FILE = "datchiklar.xlsx"
 datchiklar_baza = {}
 
@@ -32,24 +32,31 @@ def load_excel_data():
     global datchiklar_baza
     if os.path.exists(EXCEL_FILE):
         try:
-            df = pd.read_excel(EXCEL_FILE)
-            df.columns = [str(c).strip().upper() for c in df.columns]
+            # sheet_name=None — bu hamma varaqlarni birdaniga o'qiydi
+            excel_sheets = pd.read_excel(EXCEL_FILE, sheet_name=None)
+            datchiklar_baza.clear() # Bazani tozalab olamiz
             
-            for index, row in df.iterrows():
-                tag = str(row.get('DCS TAG', row.get('DCS_TAG', ''))).strip().upper()
-                if tag and tag != 'NAN' and not tag.startswith('SPARE'):
-                    datchiklar_baza[tag] = {
-                        "desc": str(row.get('DESCRIPTION', 'Ma\'lumot yo\'q')).strip(),
-                        "cabinet": str(row.get('FTB CABINET', row.get('RP CABINET FIELD', 'Ma\'lumot yo\'q'))).strip(),
-                        "jb": str(row.get('FTB NAME', row.get('RP TB NO FIELD', 'Ma\'lumot yo\'q'))).strip(),
-                        "terminals": f"{str(row.get('FTB1', '-'))} / {str(row.get('FTB2', '-'))}"
-                    }
-            print(f"✅ Baza tayyor! {len(datchiklar_baza)} ta datchik yuklandi.")
+            for sheet_name, df in excel_sheets.items():
+                # Ustun nomlarini katta harf qilib tozalaymiz
+                df.columns = [str(c).strip().upper() for c in df.columns]
+                
+                for index, row in df.iterrows():
+                    # Jadvalingizdagi ustun nomlarini tekshiramiz
+                    tag = str(row.get('DCS TAG', row.get('DCS_TAG', ''))).strip().upper()
+                    if tag and tag != 'NAN' and not tag.startswith('SPARE'):
+                        datchiklar_baza[tag] = {
+                            "desc": str(row.get('DESCRIPTION', 'Ma\'lumot yo\'q')).strip(),
+                            "cabinet": str(row.get('FTB CABINET', row.get('RP CABINET FIELD', 'Ma\'lumot yo\'q'))).strip(),
+                            "jb": str(row.get('FTB NAME', row.get('RP TB NO FIELD', 'Ma\'lumot yo\'q'))).strip(),
+                            "terminals": f"{str(row.get('FTB1', '-'))} / {str(row.get('FTB2', '-'))}"
+                        }
+            print(f"✅ Baza to'liq yangilandi! Jami {len(datchiklar_baza)} ta datchik barcha varaqlardan yuklandi.")
         except Exception as e:
             print(f"❌ Excel o'qishda xato: {e}")
     else:
         print("⚠️ 'datchiklar.xlsx' fayli topilmadi!")
 
+# Bazani ishga tushiramiz
 load_excel_data()
 
 # --- MENYULAR ---
@@ -373,7 +380,7 @@ def show_author(message):
     )
     bot.send_message(message.chat.id, author_text, reply_markup=back_menu(), parse_mode="Markdown")
 
-# --- TEXT QIDIRUV (EXCEL) TIZIMI ---
+# --- MUTLAQO YANGI: BARCHA VAROQLARDAN TAG QIDIRISH TIZIMI ---
 @bot.message_handler(func=lambda message: True)
 def search_tag_from_excel(message):
     user_text = message.text.strip().replace(' ', '_').upper()
