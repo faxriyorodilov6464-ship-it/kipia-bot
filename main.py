@@ -24,7 +24,7 @@ def keep_alive():
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-ADMIN_ID = 5237893116  
+ADMIN_ID = 8262250988
 
 EXCEL_FILE = "datchiklar.xlsx"
 USERS_FILE = "foydalanuvchilar.txt"
