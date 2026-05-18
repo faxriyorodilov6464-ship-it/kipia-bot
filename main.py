@@ -7,10 +7,28 @@ try:
 except Exception:
     pass
 
+from flask import Flask
+from threading import Thread
 import pandas as pd
 import glob
 import re
 import telebot
+
+# --- RENDER PORT BINDING XATOLIGINI TUZATISH QISMI ---
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "KIPiA Bot is Running!"
+
+def run_web_server():
+    # Render taqdim etadigan PORT'ni oladi (odatda 10000 yoki o'zgaruvchan)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+# Veb-serverni alohida oqimda (Thread) fonda ishga tushiramiz
+Thread(target=run_web_server).start()
+# -----------------------------------------------------
 
 # HTTP API Tokeningiz
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
@@ -24,27 +42,25 @@ def clean_val(val):
 
 def search_instrument_tag(search_query):
     search_query = str(search_query).strip().upper()
-    # Foydalanuvchi probel yoki chiziqcha bilan yozsa ham qidirib topishi uchun tozalash
     clean_query = re.sub(r'[-_\s]', '', search_query)
     
     results = []
     
-    # GitHub'ga yuklangan barcha Excel fayllarni qidirish (.xlsx va .xls)
+    # Yuklangan Excel fayllarni qidirish (.xlsx va .xls)
     files = glob.glob("*.xlsx") + glob.glob("*.xls")
     
     if not files:
-        return ["⚠️ Serverda hech qanday Excel (.xlsx yoki .xls) fayli topilmadi! Fayllar yuklanganini tekshiring."]
+        return ["⚠️ Serverda hech qanday Excel (.xlsx yoki .xls) fayli topilmadi!"]
 
     for file in files:
         try:
             file_upper = file.upper()
             file_name_short = os.path.basename(file)
             
-            # Excel faylining barcha varaqlarini (sheets) o'qiymiz
             excel_file = pd.ExcelFile(file)
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name)
-                df.columns = df.columns.astype(str).str.strip() # Ustun nomlarini tozalash
+                df.columns = df.columns.astype(str).str.strip()
                 
                 # --- INDORAMA DCS BAZALARI ---
                 if "INDORAMA" in file_upper:
@@ -110,7 +126,7 @@ def search_instrument_tag(search_query):
                             )
                             results.append(msg)
 
-                # --- DATCHIKLAR / BOSHQA BAZALAR ---
+                # --- DATCHIKLAR BAZASI ---
                 elif "DATCHIK" in file_upper:
                     for col in df.columns:
                         df['clean_col'] = df[col].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
@@ -124,32 +140,27 @@ def search_instrument_tag(search_query):
                                 results.append("\n".join(info_lines))
                             break
                         
-        except Exception as e:
+        except Exception:
             continue
             
-    # Bir xil xabarlar chiqib ketmasligi uchun filtrlash
-    unique_results = list(set(results))
-    return unique_results
+    return list(set(results))
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
-    bot.reply_to(message, "Assalomu alaykum Faxriyor! Qidirilayotgan KIP TAG raqamini kiriting (Masalan: PT-1103, 21_TI_201 yoki GIA-10001):")
+    bot.reply_to(message, "Assalomu alaykum Faxriyor! KIP TAG raqamini kiriting:")
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     text = message.text.strip()
-    
     if len(text) >= 3: 
-        bot.send_message(message.chat.id, "🔍 Sanab chiqilmoqda va bazalardan qidirilmoqda...")
+        bot.send_message(message.chat.id, "🔍 Bazadan qidirilmoqda...")
         natijalar = search_instrument_tag(text)
-        
         if natijalar:
             for natija in natijalar:
                 bot.send_message(message.chat.id, natija, parse_mode="Markdown")
         else:
-            bot.send_message(message.chat.id, f"❌ Afsuski, `{text}` topilmadi. Qaytadan tekshirib ko'ring.", parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"❌ `{text}` topilmadi.")
     else:
-        bot.send_message(message.chat.id, "⚠️ Qidirish uchun kamida 3 ta belgi kiriting.")
+        bot.send_message(message.chat.id, "⚠️ Kamida 3 ta belgi kiriting.")
 
-print("Bot muvaffaqiyatli ishga tushdi...")
 bot.infinity_polling()
