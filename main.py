@@ -27,7 +27,7 @@ Thread(target=run_web_server).start()
 # ------------------------------------------
 
 # Bot Token
-BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
+BOT_TOKEN = "8896826475:AAE_Z0W7Rhm6ynHH2a0smKjTyvXjW9GlLFM"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 # Global xotira kesh
