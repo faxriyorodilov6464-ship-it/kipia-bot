@@ -3,3 +3,5 @@ Flask
 pandas
 openpyxl
 xlrd
+openpyxl
+xlrd==2.0.1
