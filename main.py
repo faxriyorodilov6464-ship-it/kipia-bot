@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Server ildiz katalogini aniqlash va ishchi muhitni sozlash
+# Server ishchi muhitini sozlash
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -9,7 +9,6 @@ from flask import Flask
 from threading import Thread
 import pandas as pd
 import glob
-import re
 import telebot
 
 # --- WEB SERVER FOR RENDER PORT BINDING ---
@@ -17,7 +16,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPIA Case-Insensitive Finder is Running!"
+    return "Smart KIPiA Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -34,76 +33,88 @@ bot = telebot.TeleBot(BOT_TOKEN)
 CACHED_DATA = []
 
 def clean_val(val):
-    """Excel kataklaridagi bo'sh yoki keraksiz belgilarni tozalash"""
+    """Kataklardagi bo'sh belgilarni tozalash"""
     if pd.isna(val) or str(val).strip() in ['-', '~', 'nan', 'N/A', 'NA', '.', '', 'nan/nan', 'None']:
         return "-"
     return str(val).strip()
 
 def find_all_excel_files():
-    """Server ichidagi faqat kerakli Excel fayllarini qidirib topish (.venv va .git chetlab o'tiladi)"""
+    """Server ichidagi faqat kerakli Excel fayllarini topish"""
     excel_files = []
     for root, dirs, files in os.walk(BASE_DIR):
-        # Tizim ichki konfiguratsiya papkalariga kirib ketmasligi uchun ularni chetlab o'tamiz
         if '.venv' in root or '.git' in root:
             continue
-            
         for file in files:
             if file.lower().endswith(('.xlsx', '.xls')):
-                full_path = os.path.join(root, file)
-                excel_files.append(full_path)
+                excel_files.append(os.path.join(root, file))
     return excel_files
 
 def preload_excel_databases():
-    """Barcha topilgan Excel fayllarni RAM xotirasiga mukammal yuklash"""
+    """Sariq rangli ustun nomlarini (Headers) hisobga olib bazani RAMga yuklash"""
     global CACHED_DATA
     CACHED_DATA = []
     
     files = find_all_excel_files()
-    print(f"📂 Topilgan barcha Excel fayllar ro'yxati: {files}")
-    
     if not files:
-        print("⚠️ DIQQAT: Server ichida birorta ham Excel fayl topilmadi!")
-        return f"⚠️ Server ichida birorta ham Excel fayl topilmadi! Katalog tarkibi: {os.listdir(BASE_DIR)}"
+        return "⚠️ No Excel files found on the server!"
         
     loaded_count = 0
     for file in files:
         file_name_short = os.path.basename(file)
         try:
-            # Fayl formatiga qarab to'g'ri engine tanlash
             if file_name_short.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(file, engine='xlrd')
             else:
                 excel_file = pd.ExcelFile(file, engine='openpyxl')
                 
             for sheet_name in excel_file.sheet_names:
+                # header=None qilib o'qiymiz, keyin sariq qatorni o'zimiz qidirib topamiz
                 df = excel_file.parse(sheet_name, header=None)
-                
                 if df.empty:
                     continue
-                    
-                df = df.astype(str)
-                for index, row in df.iterrows():
+                
+                # Sariq sarlavha qatori odatda 0, 1 yoki 2-qatorda bo'ladi (ichida 'iom tag' yoki 'field tag' borini qidiramiz)
+                header_row_index = 0
+                for idx, row in df.head(5).iterrows():
+                    row_str = " ".join([str(x).lower() for x in row.values])
+                    if 'iom tag' in row_str or 'field tag' in row_str or 'description' in row_str:
+                        header_row_index = idx
+                        break
+                
+                # Sarlavha nomlarini tozalab listga olamiz
+                headers = [str(x).strip().upper() for x in df.iloc[header_row_index].values]
+                
+                # Ma'lumotlarni faqat sarlavhadan keyingi qatorlardan boshlab o'qiymiz
+                data_df = df.iloc[header_row_index + 1:]
+                
+                for index, row in data_df.iterrows():
                     row_values = [clean_val(x) for x in row.values]
-                    # Agar qatorda umuman ma'lumot bo'lsa xotiraga qo'shamiz
+                    
                     if any(x != "-" for x in row_values):
-                        row_text = " | ".join(row_values).lower()
+                        # Ustun nomi va uning qiymatini juftlik qilib Dict yaratamiz
+                        row_dict = {}
+                        for h_idx, h_name in enumerate(headers):
+                            if h_idx < len(row_values):
+                                row_dict[h_name] = row_values[h_idx]
+                        
+                        # Qidiruv oson bo'lishi uchun hamma matnni bitta qatorga yig'amiz
+                        full_text_search = " ".join(row_values).lower()
+                        
                         CACHED_DATA.append({
-                            'filename': file_name_short,
                             'sheet': sheet_name,
-                            'text': row_text,
-                            'original_row': row_values
+                            'search_text': full_text_search,
+                            'data': row_dict
                         })
                         loaded_count += 1
         except Exception as e:
-            print(f"❌ {file_name_short} faylini o'qishda xato: {e}")
+            print(f"❌ Error reading {file_name_short}: {e}")
             
-    return f"✅ Kesh muvaffaqiyatli yangilandi!\n📊 Jami yuklangan satrlar soni: {loaded_count}\n📁 O'qilgan fayllar: {list(set([d['filename'] for d in CACHED_DATA]))}"
+    return f"✅ Database successfully updated!\n📊 Total rows loaded: {loaded_count}"
 
-# Server yoqilishi bilan bazani bir marta avtomatik yuklashga urinish
 try:
     preload_excel_databases()
 except Exception as e:
-    print(f"Dastlabki yuklashda xato: {e}")
+    print(f"Initial load error: {e}")
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -120,40 +131,72 @@ def search_tag(message):
     query = message.text.strip().lower()
     
     if len(query) < 2:
-        bot.reply_to(message, "⚠️ Qidiruv uchun kamida 2 ta belgi kiriting!")
+        bot.reply_to(message, "⚠️ Please enter at least 2 characters for search!")
         return
         
     if not CACHED_DATA:
-        bot.reply_to(message, "⚠️ Xotira kesh bo'sh! Iltimos, /reload buyrug'ini bosing.")
+        bot.reply_to(message, "⚠️ Database cache is empty! Please run /reload command.")
         return
         
     results = []
     for item in CACHED_DATA:
-        if query in item['text']:
+        if query in item['search_text']:
             results.append(item)
             
     if not results:
-        bot.reply_to(message, f"🔍 '{message.text}' bo'yicha hech qanday ma'lumot topilmadi.")
+        bot.reply_to(message, f"🔍 No data found for '{message.text}'.")
         return
         
-    # Maksimal 10 ta natijani chiqarish (Telegram chekloviga tushmaslik uchun)
-    response_text = f"🔍 Topilgan natijalar ({len(results)} ta):\n\n"
-    for idx, res in enumerate(results[:10], 1):
-        response_text += f"📄 *Fayl:* {res['filename']} ({res['sheet']})\n"
-        # Tozalangan qatorni chiroyli ko'rinishga keltirish
-        clean_row = [val for val in res['original_row'] if val != "-"]
-        response_text += f"📝 *Ma'lumot:* {', '.join(clean_row)}\n"
-        response_text += "-------------------------\n"
+    # Faqat birinchi 3 ta mos kelgan natijani chiroyli blokda chiqaramiz
+    for res in results[:3]:
+        d = res['data']
         
-    if len(results) > 10:
-        response_text += f"⚠️ Yana {len(results) - 10} ta natija bor, iltimos qidiruvni aniqlashtiring."
+        # Sariq jadvalingizdagi ustun nomlariga qarab ma'lumotlarni ajratamiz
+        tag_no = d.get('FIELD TAG', d.get('IOM TAG', message.text.upper()))
+        if tag_no == "-": 
+            tag_no = d.get('IOM TAG', message.text.upper())
+            
+        iom = d.get('IOM TAG', '-')
+        rack = res['sheet']
+        ch = d.get('CHANNEL NO', d.get('CH NO', '-'))
         
-    try:
-        bot.reply_to(message, response_text, parse_mode="Markdown")
-    except Exception:
-        # Agar Markdown formatda xato bersa, oddiy matnda yuborish
-        bot.reply_to(message, response_text.replace("*", ""))
+        cabinet = d.get('SYSTEM CABINET', d.get('CABINET', '-'))
+        controller = d.get('CONTROLLER', '-')
+        description = d.get('DESCRIPTION', 'KIPiA Device')
+        
+        device_type = d.get('IOM TYPE', '-')
+        signal_type = d.get('2/4 WIRE', d.get('POWER SUPPLY', '4~20mA'))
+        
+        # JB va Klema ma'lumotlari (agar jadvalda JB yoki TB ustunlari bo'lsa)
+        ftb_cabinet = d.get('FTB NO', d.get('P&ID NO', '-'))
+        tb_no = d.get('TB1', d.get('TB NO', '-'))
+        tb2_no = d.get('TB2', '-')
+        
+        # Siz xohlagan professional inglizcha dizayn formati (ortiqcha so'zlarsiz):
+        response_text = f"🔹 *{tag_no}*\n"
+        response_text += f"IOM: {iom} | Rack: {rack} | CH: {ch}\n"
+        response_text += "-----------------------------------------\n"
+        response_text += f"Cabinet: {cabinet} | Controller: {controller}\n"
+        response_text += f"*{description}*\n\n"
+        
+        response_text += f"  • *Device Type:* {device_type}\n"
+        response_text += f"  • *Signal Type:* {signal_type}\n"
+        response_text += f"  • *Cabinet FTB:* {ftb_cabinet} | *TB:* {tb_no}\n"
+        
+        if tb2_no != "-":
+            response_text += f"  • *TB2 / Return:* {tb2_no}\n"
+            
+        response_text += "\n=========================\n"
+        
+        try:
+            bot.send_message(message.chat.id, response_text, parse_mode="Markdown")
+        except Exception:
+            clean_text = response_text.replace("*", "")
+            bot.send_message(message.chat.id, clean_text)
+            
+    if len(results) > 3:
+        bot.send_message(message.chat.id, f"⚠️ Found {len(results)} matches. Showing first 3. Please clarify your query.")
 
-# Botni uzluksiz yurgizish
-print("🚀 Bot muvaffaqiyatli ishga tushdi...")
+# Botni ishga tushirish
+print("🚀 Professional KIPiA Bot is running...")
 bot.infinity_polling()
