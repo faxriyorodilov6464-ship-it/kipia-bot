@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Absolute path correction for Render stability
+# Server ildiz katalogini aniqlash va ishchi muhitni sozlash
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 os.chdir(BASE_DIR)
 
@@ -17,7 +17,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Absolute Finder is Running!"
+    return "KIPiA Deep Search Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -30,35 +30,43 @@ Thread(target=run_web_server).start()
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Global memory cache
+# Global xotira kesh
 CACHED_DATA = []
 
 def clean_val(val):
-    """Clean empty values or placeholders in Excel cells"""
+    """Excel kataklaridagi bo'sh yoki keraksiz belgilarni tozalash"""
     if pd.isna(val) or str(val).strip() in ['-', '—', 'nan', 'N/A', 'NA', '_', '', 'nan/nan', 'None']:
         return "—"
     return str(val).strip()
 
+def find_all_excel_files():
+    """Server ichidagi barcha Excel fayllarni chuqur qidirib topish"""
+    excel_files = []
+    # Serverning asosiy ishchi jildidan boshlab hamma yoqni qidiradi
+    for root, dirs, files in os.walk(BASE_DIR):
+        for file in files:
+            if file.lower().endswith(('.xlsx', '.xls')):
+                full_path = os.path.join(root, file)
+                excel_files.append(full_path)
+    return excel_files
+
 def preload_excel_databases():
-    """Load all Excel formats properly into RAM using absolute path resolution"""
+    """Barcha topilgan Excel fayllarni RAM xotirasiga mukammal yuklash"""
     global CACHED_DATA
     CACHED_DATA = []
     
-    # Secure absolute path lookups for Render environment
-    search_path_xlsx = os.path.join(BASE_DIR, "*.xlsx")
-    search_path_xls = os.path.join(BASE_DIR, "*.xls")
-    
-    files = glob.glob(search_path_xlsx) + glob.glob(search_path_xls)
-    print(f"📦 Preloading databases from {BASE_DIR}: {files}")
+    files = find_all_excel_files()
+    print(f"📦 Topilgan barcha Excel fayllar ro'yxati: {files}")
     
     if not files:
-        print("⚠️ WARNING: No Excel files detected in directory root!")
+        print("⚠️ DIQQAT: Server ichida birorta ham Excel fayl topilmadi!")
         return
 
     for file in files:
         try:
             file_name_short = os.path.basename(file)
             
+            # .xls formatlar uchun xlrd dvigatelini ishlatish
             if file_name_short.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(file, engine='xlrd')
             else:
@@ -70,6 +78,7 @@ def preload_excel_databases():
                 if df.empty:
                     continue
                 
+                # Sarlavha (Header) qatorini aniqlashga urinish
                 header_row = None
                 for i in range(min(5, len(df))):
                     row_str = "".join(df.iloc[i].astype(str).values).upper()
@@ -80,6 +89,7 @@ def preload_excel_databases():
                 if header_row is None and len(df) > 0:
                     header_row = list(df.iloc[0])
 
+                # Har bir satrni xotiraga joylash
                 for idx, row in df.iterrows():
                     row_data_list = list(row)
                     row_text_combined = "".join(row.astype(str).values).upper()
@@ -93,9 +103,10 @@ def preload_excel_databases():
                         "header_row": header_row
                     })
         except Exception as e:
-            print(f"❌ Error preloading {file}: {e}")
+            print(f"❌ Faylni o'qishda xatolik {file_name_short}: {e}")
             continue
-    print(f"✅ Preload finished. Total rows cached: {len(CACHED_DATA)}")
+            
+    print(f"✅ Yuklash yakunlandi. Jami keshga olingan satrlar: {len(CACHED_DATA)}")
 
 def search_instrument_tag_fast(search_query):
     search_query = str(search_query).strip().upper()
@@ -104,7 +115,7 @@ def search_instrument_tag_fast(search_query):
     if not CACHED_DATA:
         preload_excel_databases()
         if not CACHED_DATA:
-            return ["⚠️ Database files could not be read or are missing from the server. Please run /reload"]
+            return ["⚠️ Baza fayllari o'qilmadi yoki serverda Excel fayllar topilmadi. Qayta urinish uchun /reload buyrug'ini bosing."]
             
     results = []
     
@@ -141,7 +152,7 @@ def send_welcome(message):
     markup = telebot.types.ReplyKeyboardRemove(selective=False)
     bot.reply_to(
         message, 
-        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases:",
+        "Welcome to Smart KIPiA Search Bot!\n\nEnter KIP TAG number to search across all databases:",
         reply_markup=markup
     )
 
@@ -150,9 +161,11 @@ def manual_reload(message):
     bot.reply_to(message, "🔄 Reloading Excel files into memory cache...")
     preload_excel_databases()
     if CACHED_DATA:
-        bot.send_message(message.chat.id, f"✅ Memory cache updated successfully! Total loaded rows: {len(CACHED_DATA)}")
+        bot.send_message(message.chat.id, f"✅ Xotira muvaffaqiyatli yangilandi! Jami yuklangan ma'lumotlar soni: {len(CACHED_DATA)}")
     else:
-        bot.send_message(message.chat.id, "⚠️ Active reload finished but cache is still empty. Check server files.")
+        # Fayllar mutlaqo topilmasa, joriy katalog ichidagi narsalarni ko'rsatadi (Log uchun)
+        current_dir_content = os.listdir(BASE_DIR)
+        bot.send_message(message.chat.id, f"⚠️ Bazani yangilash urunishi tugadi, lekin kesh baribir bo'sh. Kataloq tarkibi: {current_dir_content}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
@@ -165,9 +178,9 @@ def handle_messages(message):
             for result in results:
                 bot.send_message(message.chat.id, result)
         else:
-            bot.send_message(message.chat.id, f"❌ Match for '{text}' not found in any database.")
+            bot.send_message(message.chat.id, f"❌ '{text}' bo'yicha hech qanday ma'lumot topilmadi.")
     else:
-        bot.send_message(message.chat.id, "⚠️ Please enter at least 3 characters to search.")
+        bot.send_message(message.chat.id, "⚠️ Qidirish uchun kamida 3 ta belgi kiriting.")
 
 if __name__ == '__main__':
     preload_excel_databases()
