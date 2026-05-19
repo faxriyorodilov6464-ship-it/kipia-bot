@@ -17,7 +17,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Deep Search Finder is Running!"
+    return "KIPiA Case-Insensitive Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -40,11 +40,11 @@ def clean_val(val):
     return str(val).strip()
 
 def find_all_excel_files():
-    """Server ichidagi barcha Excel fayllarni chuqur qidirib topish"""
+    """Server ichidagi barcha Excel fayllarni (katta-kichik harflarga qaramasdan) qidirib topish"""
     excel_files = []
-    # Serverning asosiy ishchi jildidan boshlab hamma yoqni qidiradi
     for root, dirs, files in os.walk(BASE_DIR):
         for file in files:
+            # .xlsx, .xlsx, .xls, .XLS, .Xlsx formatlarning hammasini qabul qiladi
             if file.lower().endswith(('.xlsx', '.xls')):
                 full_path = os.path.join(root, file)
                 excel_files.append(full_path)
@@ -63,10 +63,9 @@ def preload_excel_databases():
         return
 
     for file in files:
+        file_name_short = os.path.basename(file)
         try:
-            file_name_short = os.path.basename(file)
-            
-            # .xls formatlar uchun xlrd dvigatelini ishlatish
+            # Fayl formati qanday yozilgan bo'lishidan qat'iy nazar to'g'ri engine tanlash
             if file_name_short.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(file, engine='xlrd')
             else:
@@ -163,9 +162,8 @@ def manual_reload(message):
     if CACHED_DATA:
         bot.send_message(message.chat.id, f"✅ Xotira muvaffaqiyatli yangilandi! Jami yuklangan ma'lumotlar soni: {len(CACHED_DATA)}")
     else:
-        # Fayllar mutlaqo topilmasa, joriy katalog ichidagi narsalarni ko'rsatadi (Log uchun)
         current_dir_content = os.listdir(BASE_DIR)
-        bot.send_message(message.chat.id, f"⚠️ Bazani yangilash urunishi tugadi, lekin kesh baribir bo'sh. Kataloq tarkibi: {current_dir_content}")
+        bot.send_message(message.chat.id, f"⚠️ Kesh baribir bo'sh. Kataloq tarkibi: {current_dir_content}")
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
