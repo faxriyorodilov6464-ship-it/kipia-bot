@@ -1,11 +1,9 @@
 import os
 import sys
 
-# Auto-correct working directory for Render
-try:
-    os.chdir(os.path.dirname(os.path.abspath(__file__)))
-except Exception:
-    pass
+# Absolute path correction for Render stability
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+os.chdir(BASE_DIR)
 
 from flask import Flask
 from threading import Thread
@@ -19,7 +17,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Multi-Format Finder is Running!"
+    return "KIPiA Absolute Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -42,20 +40,26 @@ def clean_val(val):
     return str(val).strip()
 
 def preload_excel_databases():
-    """Load all Excel formats (.xlsx and .xls) properly into RAM with dynamic header handling"""
+    """Load all Excel formats properly into RAM using absolute path resolution"""
     global CACHED_DATA
     CACHED_DATA = []
     
-    # Target both modern and older Excel formats
-    files = glob.glob("*.xlsx") + glob.glob("*.xls")
-    print(f"📦 Preloading databases: {files}")
+    # Secure absolute path lookups for Render environment
+    search_path_xlsx = os.path.join(BASE_DIR, "*.xlsx")
+    search_path_xls = os.path.join(BASE_DIR, "*.xls")
     
+    files = glob.glob(search_path_xlsx) + glob.glob(search_path_xls)
+    print(f"📦 Preloading databases from {BASE_DIR}: {files}")
+    
+    if not files:
+        print("⚠️ WARNING: No Excel files detected in directory root!")
+        return
+
     for file in files:
         try:
             file_name_short = os.path.basename(file)
             
-            # Use 'xlrd' engine explicitly for older .xls files
-            if file.endswith('.xls'):
+            if file_name_short.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(file, engine='xlrd')
             else:
                 excel_file = pd.ExcelFile(file)
@@ -66,7 +70,6 @@ def preload_excel_databases():
                 if df.empty:
                     continue
                 
-                # Attempt to look for a row that resembles a header
                 header_row = None
                 for i in range(min(5, len(df))):
                     row_str = "".join(df.iloc[i].astype(str).values).upper()
@@ -77,10 +80,8 @@ def preload_excel_databases():
                 if header_row is None and len(df) > 0:
                     header_row = list(df.iloc[0])
 
-                # Process every single row into cache memory
                 for idx, row in df.iterrows():
                     row_data_list = list(row)
-                    
                     row_text_combined = "".join(row.astype(str).values).upper()
                     clean_row_text = re.sub(r'[-_\s]', '', row_text_combined)
                     
@@ -103,7 +104,7 @@ def search_instrument_tag_fast(search_query):
     if not CACHED_DATA:
         preload_excel_databases()
         if not CACHED_DATA:
-            return ["⚠️ Database files could not be read or are missing from the server."]
+            return ["⚠️ Database files could not be read or are missing from the server. Please run /reload"]
             
     results = []
     
@@ -126,7 +127,6 @@ def search_instrument_tag_fast(search_query):
                     if possible_label and possible_label != 'nan' and possible_label != str(cell_value):
                         attr_name = possible_label
                 
-                # Remove markdown styling to keep text simple and elegant
                 attr_name = re.sub(r'[*_`\[\]]', '', attr_name)
                 val_str = re.sub(r'[*_`\[\]]', '', val_str)
                 
@@ -141,7 +141,7 @@ def send_welcome(message):
     markup = telebot.types.ReplyKeyboardRemove(selective=False)
     bot.reply_to(
         message, 
-        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases (e.g., PT-1103, LICA-10101, or II-B22303):",
+        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases:",
         reply_markup=markup
     )
 
@@ -149,7 +149,10 @@ def send_welcome(message):
 def manual_reload(message):
     bot.reply_to(message, "🔄 Reloading Excel files into memory cache...")
     preload_excel_databases()
-    bot.send_message(message.chat.id, "✅ Memory cache updated successfully!")
+    if CACHED_DATA:
+        bot.send_message(message.chat.id, f"✅ Memory cache updated successfully! Total loaded rows: {len(CACHED_DATA)}")
+    else:
+        bot.send_message(message.chat.id, "⚠️ Active reload finished but cache is still empty. Check server files.")
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
