@@ -2,4 +2,4 @@ pyTelegramBotAPI
 Flask
 pandas
 openpyxl
-flask
+xlrd
