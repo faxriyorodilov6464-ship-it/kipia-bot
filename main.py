@@ -17,11 +17,11 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Case-Insensitive Finder is Running!"
+    return "KIPIA Case-Insensitive Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host="0.0.0.0", port=port)
 
 Thread(target=run_web_server).start()
 # ------------------------------------------
@@ -30,21 +30,24 @@ Thread(target=run_web_server).start()
 BOT_TOKEN = "8896826475:AAE_Z0W7Rhm6ynHH2a0smKjTyvXjW9GlLFM"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Global xotira kesh
+# Global xotira keshi
 CACHED_DATA = []
 
 def clean_val(val):
     """Excel kataklaridagi bo'sh yoki keraksiz belgilarni tozalash"""
-    if pd.isna(val) or str(val).strip() in ['-', '—', 'nan', 'N/A', 'NA', '_', '', 'nan/nan', 'None']:
-        return "—"
+    if pd.isna(val) or str(val).strip() in ['-', '~', 'nan', 'N/A', 'NA', '.', '', 'nan/nan', 'None']:
+        return "-"
     return str(val).strip()
 
 def find_all_excel_files():
-    """Server ichidagi barcha Excel fayllarni (katta-kichik harflarga qaramasdan) qidirib topish"""
+    """Server ichidagi faqat kerakli Excel fayllarini qidirib topish (.venv va .git chetlab o'tiladi)"""
     excel_files = []
     for root, dirs, files in os.walk(BASE_DIR):
+        # Tizim ichki konfiguratsiya papkalariga kirib ketmasligi uchun ularni chetlab o'tamiz
+        if '.venv' in root or '.git' in root:
+            continue
+            
         for file in files:
-            # .xlsx, .xlsx, .xls, .XLS, .Xlsx formatlarning hammasini qabul qiladi
             if file.lower().endswith(('.xlsx', '.xls')):
                 full_path = os.path.join(root, file)
                 excel_files.append(full_path)
@@ -56,130 +59,101 @@ def preload_excel_databases():
     CACHED_DATA = []
     
     files = find_all_excel_files()
-    print(f"📦 Topilgan barcha Excel fayllar ro'yxati: {files}")
+    print(f"📂 Topilgan barcha Excel fayllar ro'yxati: {files}")
     
     if not files:
         print("⚠️ DIQQAT: Server ichida birorta ham Excel fayl topilmadi!")
-        return
-
+        return f"⚠️ Server ichida birorta ham Excel fayl topilmadi! Katalog tarkibi: {os.listdir(BASE_DIR)}"
+        
+    loaded_count = 0
     for file in files:
         file_name_short = os.path.basename(file)
         try:
-            # Fayl formati qanday yozilgan bo'lishidan qat'iy nazar to'g'ri engine tanlash
+            # Fayl formatiga qarab to'g'ri engine tanlash
             if file_name_short.lower().endswith('.xls'):
                 excel_file = pd.ExcelFile(file, engine='xlrd')
             else:
-                excel_file = pd.ExcelFile(file)
-            
+                excel_file = pd.ExcelFile(file, engine='openpyxl')
+                
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name, header=None)
                 
                 if df.empty:
                     continue
-                
-                # Sarlavha (Header) qatorini aniqlashga urinish
-                header_row = None
-                for i in range(min(5, len(df))):
-                    row_str = "".join(df.iloc[i].astype(str).values).upper()
-                    if "TAG" in row_str or "DESCRIPTION" in row_str or "CABINET" in row_str:
-                        header_row = list(df.iloc[i])
-                        break
-                
-                if header_row is None and len(df) > 0:
-                    header_row = list(df.iloc[0])
-
-                # Har bir satrni xotiraga joylash
-                for idx, row in df.iterrows():
-                    row_data_list = list(row)
-                    row_text_combined = "".join(row.astype(str).values).upper()
-                    clean_row_text = re.sub(r'[-_\s]', '', row_text_combined)
                     
-                    CACHED_DATA.append({
-                        "clean_text": clean_row_text,
-                        "file_name": file_name_short,
-                        "sheet_name": sheet_name,
-                        "row_data": row_data_list,
-                        "header_row": header_row
-                    })
+                df = df.astype(str)
+                for index, row in df.iterrows():
+                    row_values = [clean_val(x) for x in row.values]
+                    # Agar qatorda umuman ma'lumot bo'lsa xotiraga qo'shamiz
+                    if any(x != "-" for x in row_values):
+                        row_text = " | ".join(row_values).lower()
+                        CACHED_DATA.append({
+                            'filename': file_name_short,
+                            'sheet': sheet_name,
+                            'text': row_text,
+                            'original_row': row_values
+                        })
+                        loaded_count += 1
         except Exception as e:
-            print(f"❌ Faylni o'qishda xatolik {file_name_short}: {e}")
-            continue
+            print(f"❌ {file_name_short} faylini o'qishda xato: {e}")
             
-    print(f"✅ Yuklash yakunlandi. Jami keshga olingan satrlar: {len(CACHED_DATA)}")
+    return f"✅ Kesh muvaffaqiyatli yangilandi!\n📊 Jami yuklangan satrlar soni: {loaded_count}\n📁 O'qilgan fayllar: {list(set([d['filename'] for d in CACHED_DATA]))}"
 
-def search_instrument_tag_fast(search_query):
-    search_query = str(search_query).strip().upper()
-    clean_query = re.sub(r'[-_\s]', '', search_query)
-    
-    if not CACHED_DATA:
-        preload_excel_databases()
-        if not CACHED_DATA:
-            return ["⚠️ Baza fayllari o'qilmadi yoki serverda Excel fayllar topilmadi. Qayta urinish uchun /reload buyrug'ini bosing."]
-            
-    results = []
-    
-    for item in CACHED_DATA:
-        if clean_query in item["clean_text"]:
-            info_lines = [
-                f"📊 DATABASE: {item['file_name']}",
-                f"📄 Sheet: {item['sheet_name']}",
-                "———————————————"
-            ]
-            
-            for col_idx, cell_value in enumerate(item["row_data"]):
-                val_str = clean_val(cell_value)
-                if val_str == "—":
-                    continue
-                
-                attr_name = f"Column {col_idx + 1}"
-                if item["header_row"] is not None and col_idx < len(item["header_row"]):
-                    possible_label = str(item["header_row"][col_idx]).strip()
-                    if possible_label and possible_label != 'nan' and possible_label != str(cell_value):
-                        attr_name = possible_label
-                
-                attr_name = re.sub(r'[*_`\[\]]', '', attr_name)
-                val_str = re.sub(r'[*_`\[\]]', '', val_str)
-                
-                info_lines.append(f"🔹 {attr_name}: {val_str}")
-            
-            results.append("\n".join(info_lines))
-            
-    return list(set(results))
+# Server yoqilishi bilan bazani bir marta avtomatik yuklashga urinish
+try:
+    preload_excel_databases()
+except Exception as e:
+    print(f"Dastlabki yuklashda xato: {e}")
 
-@bot.message_handler(commands=['start', 'help'])
+@bot.message_handler(commands=['start'])
 def send_welcome(message):
-    markup = telebot.types.ReplyKeyboardRemove(selective=False)
-    bot.reply_to(
-        message, 
-        "Welcome to Smart KIPiA Search Bot!\n\nEnter KIP TAG number to search across all databases:",
-        reply_markup=markup
-    )
+    bot.reply_to(message, "Welcome to Smart KIPiA Search Bot!\n\nEnter KIP TAG number to search across all databases:")
 
 @bot.message_handler(commands=['reload'])
-def manual_reload(message):
+def reload_cache(message):
     bot.reply_to(message, "🔄 Reloading Excel files into memory cache...")
-    preload_excel_databases()
-    if CACHED_DATA:
-        bot.send_message(message.chat.id, f"✅ Xotira muvaffaqiyatli yangilandi! Jami yuklangan ma'lumotlar soni: {len(CACHED_DATA)}")
-    else:
-        current_dir_content = os.listdir(BASE_DIR)
-        bot.send_message(message.chat.id, f"⚠️ Kesh baribir bo'sh. Kataloq tarkibi: {current_dir_content}")
+    status_msg = preload_excel_databases()
+    bot.reply_to(message, status_msg)
 
 @bot.message_handler(func=lambda message: True)
-def handle_messages(message):
-    text = message.text.strip()
+def search_tag(message):
+    query = message.text.strip().lower()
     
-    if len(text) >= 3: 
-        results = search_instrument_tag_fast(text)
+    if len(query) < 2:
+        bot.reply_to(message, "⚠️ Qidiruv uchun kamida 2 ta belgi kiriting!")
+        return
         
-        if results:
-            for result in results:
-                bot.send_message(message.chat.id, result)
-        else:
-            bot.send_message(message.chat.id, f"❌ '{text}' bo'yicha hech qanday ma'lumot topilmadi.")
-    else:
-        bot.send_message(message.chat.id, "⚠️ Qidirish uchun kamida 3 ta belgi kiriting.")
+    if not CACHED_DATA:
+        bot.reply_to(message, "⚠️ Xotira kesh bo'sh! Iltimos, /reload buyrug'ini bosing.")
+        return
+        
+    results = []
+    for item in CACHED_DATA:
+        if query in item['text']:
+            results.append(item)
+            
+    if not results:
+        bot.reply_to(message, f"🔍 '{message.text}' bo'yicha hech qanday ma'lumot topilmadi.")
+        return
+        
+    # Maksimal 10 ta natijani chiqarish (Telegram chekloviga tushmaslik uchun)
+    response_text = f"🔍 Topilgan natijalar ({len(results)} ta):\n\n"
+    for idx, res in enumerate(results[:10], 1):
+        response_text += f"📄 *Fayl:* {res['filename']} ({res['sheet']})\n"
+        # Tozalangan qatorni chiroyli ko'rinishga keltirish
+        clean_row = [val for val in res['original_row'] if val != "-"]
+        response_text += f"📝 *Ma'lumot:* {', '.join(clean_row)}\n"
+        response_text += "-------------------------\n"
+        
+    if len(results) > 10:
+        response_text += f"⚠️ Yana {len(results) - 10} ta natija bor, iltimos qidiruvni aniqlashtiring."
+        
+    try:
+        bot.reply_to(message, response_text, parse_mode="Markdown")
+    except Exception:
+        # Agar Markdown formatda xato bersa, oddiy matnda yuborish
+        bot.reply_to(message, response_text.replace("*", ""))
 
-if __name__ == '__main__':
-    preload_excel_databases()
-    bot.infinity_polling()
+# Botni uzluksiz yurgizish
+print("🚀 Bot muvaffaqiyatli ishga tushdi...")
+bot.infinity_polling()
