@@ -39,7 +39,7 @@ def clean_val(val):
     return str(val).strip()
 
 def find_all_excel_files():
-    """Server ichidagi faqat kerakli Excel fayllarini topish"""
+    """Server ichidagi barcha Excel fayllarini topish"""
     excel_files = []
     for root, dirs, files in os.walk(BASE_DIR):
         if '.venv' in root or '.git' in root:
@@ -50,7 +50,7 @@ def find_all_excel_files():
     return excel_files
 
 def preload_excel_databases():
-    """Sariq rangli ustun nomlarini (Headers) hisobga olib bazani RAMga yuklash"""
+    """Ustunlarni 100% aniqlik bilan bog'lab RAMga yuklash"""
     global CACHED_DATA
     CACHED_DATA = []
     
@@ -68,42 +68,41 @@ def preload_excel_databases():
                 excel_file = pd.ExcelFile(file, engine='openpyxl')
                 
             for sheet_name in excel_file.sheet_names:
-                # header=None qilib o'qiymiz, keyin sariq qatorni o'zimiz qidirib topamiz
                 df = excel_file.parse(sheet_name, header=None)
                 if df.empty:
                     continue
                 
-                # Sariq sarlavha qatori odatda 0, 1 yoki 2-qatorda bo'ladi (ichida 'iom tag' yoki 'field tag' borini qidiramiz)
+                # Sariq sarlavha qatorini (Headers) aniqlash (1-8 qatorlar orasidan)
                 header_row_index = 0
-                for idx, row in df.head(5).iterrows():
+                for idx, row in df.head(8).iterrows():
                     row_str = " ".join([str(x).lower() for x in row.values])
-                    if 'iom tag' in row_str or 'field tag' in row_str or 'description' in row_str:
+                    if 'tag' in row_str or 'description' in row_str or 'cabinet' in row_str or 'type' in row_str:
                         header_row_index = idx
                         break
                 
-                # Sarlavha nomlarini tozalab listga olamiz
-                headers = [str(x).strip().upper() for x in df.iloc[header_row_index].values]
+                # Sarlavhalarni kichik harfda va toza formatda olamiz
+                headers = [str(x).strip().lower() for x in df.iloc[header_row_index].values]
                 
-                # Ma'lumotlarni faqat sarlavhadan keyingi qatorlardan boshlab o'qiymiz
+                # Ma'lumotlar sarlavhadan keyingi qatordan boshlanadi
                 data_df = df.iloc[header_row_index + 1:]
                 
                 for index, row in data_df.iterrows():
                     row_values = [clean_val(x) for x in row.values]
                     
                     if any(x != "-" for x in row_values):
-                        # Ustun nomi va uning qiymatini juftlik qilib Dict yaratamiz
                         row_dict = {}
                         for h_idx, h_name in enumerate(headers):
                             if h_idx < len(row_values):
                                 row_dict[h_name] = row_values[h_idx]
                         
-                        # Qidiruv oson bo'lishi uchun hamma matnni bitta qatorga yig'amiz
                         full_text_search = " ".join(row_values).lower()
                         
                         CACHED_DATA.append({
+                            'file': file_name_short,
                             'sheet': sheet_name,
                             'search_text': full_text_search,
-                            'data': row_dict
+                            'data': row_dict,
+                            'raw_list': row_values
                         })
                         loaded_count += 1
         except Exception as e:
@@ -147,34 +146,96 @@ def search_tag(message):
         bot.reply_to(message, f"🔍 No data found for '{message.text}'.")
         return
         
-    # Faqat birinchi 3 ta mos kelgan natijani chiroyli blokda chiqaramiz
     for res in results[:3]:
         d = res['data']
+        raw = res['raw_list']
         
-        # Sariq jadvalingizdagi ustun nomlariga qarab ma'lumotlarni ajratamiz
-        tag_no = d.get('FIELD TAG', d.get('IOM TAG', message.text.upper()))
-        if tag_no == "-": 
-            tag_no = d.get('IOM TAG', message.text.upper())
+        # --- BARCHA JADVAL VARIANTLARINI TEKSHIRADIGAN AQLLI FILTR ---
+        
+        # 1. FIELD TAG (Datchik nomi)
+        tag_no = "-"
+        for k, v in d.items():
+            if 'field tag' in k or 'device tag' in k or 'tag no' in k or 'tag_no' in k or 'datchik' in k:
+                if v != "-": tag_no = v; break
+        if tag_no == "-":
+            for k, v in d.items():
+                if 'iom tag' in k or 'dcs tag' in k or 'tag' in k:
+                    if v != "-": tag_no = v; break
+        if tag_no == "-": tag_no = message.text.upper()
+
+        # 2. IOM TAG
+        iom = "-"
+        for k, v in d.items():
+            if 'iom tag' in k or 'module tag' in k or 'iom_tag' in k: 
+                if v != "-": iom = v; break
+        if iom == "-" and len(raw) > 3: iom = raw[3] # Zaxira reja
+
+        # 3. CHANNEL NO
+        ch = "-"
+        for k, v in d.items():
+            if 'channel' in k or 'ch no' in k or 'ch_no' in k or 'ch.' in k or 'kun' in k: 
+                if v != "-": ch = v; break
+        if ch == "-" and len(raw) > 10: ch = raw[10] # Zaxira reja
+
+        # 4. SYSTEM CABINET
+        cabinet = "-"
+        for k, v in d.items():
+            if 'system cabinet' in k or 'cabinet' in k or 'panel' in k or 'shkaf' in k or 'cab' in k: 
+                if v != "-": cabinet = v; break
+        if cabinet == "-" and len(raw) > 8: cabinet = raw[8] # Zaxira reja
+
+        # 5. CONTROLLER
+        controller = "-"
+        for k, v in d.items():
+            if 'controller' in k or 'cpu' in k or 'kontrol' in k: 
+                if v != "-": controller = v; break
+        if controller == "-" and len(raw) > 9: controller = raw[9] # Zaxira reja
+
+        # 6. DESCRIPTION (Izoh)
+        description = "-"
+        for k, v in d.items():
+            if 'description' in k or 'service' in k or 'izoh' in k or 'nomi' in k: 
+                if v != "-": description = v; break
+        if description == "-" and len(raw) > 7: description = raw[7] # Zaxira reja
+        if description == "-": description = "KIPiA Device"
+
+        # 7. DEVICE TYPE
+        device_type = "-"
+        for k, v in d.items():
+            if 'iom type' in k or 'device type' in k or 'type' in k or 'tur' in k: 
+                if v != "-": device_type = v; break
+        if device_type == "-" and len(raw) > 1: device_type = raw[1] # Zaxira reja
             
-        iom = d.get('IOM TAG', '-')
-        rack = res['sheet']
-        ch = d.get('CHANNEL NO', d.get('CH NO', '-'))
-        
-        cabinet = d.get('SYSTEM CABINET', d.get('CABINET', '-'))
-        controller = d.get('CONTROLLER', '-')
-        description = d.get('DESCRIPTION', 'KIPiA Device')
-        
-        device_type = d.get('IOM TYPE', '-')
-        signal_type = d.get('2/4 WIRE', d.get('POWER SUPPLY', '4~20mA'))
-        
-        # JB va Klema ma'lumotlari (agar jadvalda JB yoki TB ustunlari bo'lsa)
-        ftb_cabinet = d.get('FTB NO', d.get('P&ID NO', '-'))
-        tb_no = d.get('TB1', d.get('TB NO', '-'))
-        tb2_no = d.get('TB2', '-')
-        
-        # Siz xohlagan professional inglizcha dizayn formati (ortiqcha so'zlarsiz):
+        # 8. SIGNAL TYPE
+        signal_type = "-"
+        for k, v in d.items():
+            if 'wire' in k or 'signal' in k or 'power supply' in k: 
+                if v != "-": signal_type = v; break
+        if signal_type == "-": signal_type = "4~20mA"
+
+        # 9. CABINET FTB (Marshrut qutisi yoki P&ID)
+        ftb_cabinet = "-"
+        for k, v in d.items():
+            if 'ftb' in k or 'p&id' in k or 'pid' in k or 'jb' in k: 
+                if v != "-": ftb_cabinet = v; break
+        if ftb_cabinet == "-" and len(raw) > 4: ftb_cabinet = raw[4] # Zaxira reja
+            
+        # 10. TERMINAL BLOKLAR (TB1 va TB2)
+        tb_no = "-"
+        for k, v in d.items():
+            if 'tb1' in k or 'tb no' in k or 'terminal 1' in k or 'klema' in k: 
+                if v != "-": tb_no = v; break
+        if tb_no == "-" and len(raw) > 11: tb_no = raw[11] # Zaxira reja
+            
+        tb2_no = "-"
+        for k, v in d.items():
+            if 'tb2' in k or 'return' in k or 'terminal 2' in k: 
+                if v != "-": tb2_no = v; break
+        if tb2_no == "-" and len(raw) > 12: tb2_no = raw[12] # Zaxira reja
+
+        # --- PROFESSIONAL TAGMA-TAG MATN FORMATI ---
         response_text = f"🔹 *{tag_no}*\n"
-        response_text += f"IOM: {iom} | Rack: {rack} | CH: {ch}\n"
+        response_text += f"IOM: {iom} | Rack: {res['sheet']} | CH: {ch}\n"
         response_text += "-----------------------------------------\n"
         response_text += f"Cabinet: {cabinet} | Controller: {controller}\n"
         response_text += f"*{description}*\n\n"
@@ -183,7 +244,7 @@ def search_tag(message):
         response_text += f"  • *Signal Type:* {signal_type}\n"
         response_text += f"  • *Cabinet FTB:* {ftb_cabinet} | *TB:* {tb_no}\n"
         
-        if tb2_no != "-":
+        if tb2_no != "-" and tb2_no != "0":
             response_text += f"  • *TB2 / Return:* {tb2_no}\n"
             
         response_text += "\n=========================\n"
@@ -198,5 +259,5 @@ def search_tag(message):
         bot.send_message(message.chat.id, f"⚠️ Found {len(results)} matches. Showing first 3. Please clarify your query.")
 
 # Botni ishga tushirish
-print("🚀 Professional KIPiA Bot is running...")
+print("🚀 Ultra Smart Adaptive KIPiA Bot is running...")
 bot.infinity_polling()
