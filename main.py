@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Serverda yoki telefonda papka yo'nalishini avtomatik to'g'rilash
+# Auto-correct working directory for Render/Pydroid
 try:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 except Exception:
@@ -14,43 +14,42 @@ import glob
 import re
 import telebot
 
-# --- RENDER PORT BINDING XATOLIGINI TUZATISH QISMI ---
+# --- WEB SERVER FOR RENDER PORT BINDING ---
 app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Bot is Running!"
+    return "KIPiA Search Bot is Running!"
 
 def run_web_server():
-    # Render taqdim etadigan PORT'ni oladi (odatda 10000 yoki o'zgaruvchan)
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# Veb-serverni alohida oqimda (Thread) fonda ishga tushiramiz
 Thread(target=run_web_server).start()
-# -----------------------------------------------------
+# ------------------------------------------
 
-# HTTP API Tokeningiz
+# Bot Token
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
 def clean_val(val):
-    """Bazadagi bo'shliqlar yoki tushunarsiz belgilarni chiroyli ko'rinishga keltirish"""
+    """Clean empty values or placeholders in Excel cells"""
     if pd.isna(val) or str(val).strip() in ['-', '—', 'nan', 'N/A', 'NA', '_', '', 'nan/nan']:
         return "—"
     return str(val).strip()
 
 def search_instrument_tag(search_query):
     search_query = str(search_query).strip().upper()
+    # Normalize query by removing spaces, dashes, and underscores
     clean_query = re.sub(r'[-_\s]', '', search_query)
     
     results = []
     
-    # Yuklangan Excel fayllarni qidirish (.xlsx va .xls)
+    # Search for all Excel files in the directory
     files = glob.glob("*.xlsx") + glob.glob("*.xls")
     
     if not files:
-        return ["⚠️ Serverda hech qanday Excel (.xlsx yoki .xls) fayli topilmadi!"]
+        return ["⚠️ No Excel database files (.xlsx/.xls) found on the server!"]
 
     for file in files:
         try:
@@ -60,107 +59,74 @@ def search_instrument_tag(search_query):
             excel_file = pd.ExcelFile(file)
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name)
-                df.columns = df.columns.astype(str).str.strip()
                 
-                # --- INDORAMA DCS BAZALARI ---
-                if "INDORAMA" in file_upper:
-                    tag_col = None
-                    for col in ['DCS TAG', 'DCS TAGS', 'FIELD TAG', '1617', 'DSC TAG']:
-                        if col in df.columns:
-                            tag_col = col
-                            break
-                    
-                    if tag_col:
-                        df['clean_tag_col'] = df[tag_col].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
-                        matched_rows = df[df['clean_tag_col'].str.contains(clean_query, na=False)]
-                        
-                        for _, row in matched_rows.iterrows():
-                            desc = row.get('DESCRIPTION', row.get('SERVICE', '—'))
-                            sys_cab = row.get('SYSTEM CABINET', '—')
-                            bar_cab = row.get('BARRIER CABINET', row.get('RELAY CABINET', '—'))
-                            bar_name = row.get('BARRIER NAME', row.get('RELAY NAME', '—'))
-                            ftb_cab = row.get('FTB CABINET', '—')
-                            ftb_name = row.get('FTB NAME', '—')
-                            ftb1 = row.get('FTB1', '—')
-                            ftb2 = row.get('FTB2', '—')
-                            
-                            jb_name = row.get('IRP-TB NAME.', row.get('IRP TB NAME', row.get('IRP CABINET  FIELD', '—')))
-                            jb_tb1 = row.get('TB (+)', row.get('IRP-TB (+)', '—'))
-                            jb_tb2 = row.get('TB (-)', row.get('IRP TB (-)', '—'))
-                            
-                            msg = (
-                                f"🌐 **TIZIM:** DCS ({sheet_name})\n"
-                                f"📌 **TAG:** `{clean_val(row[tag_col])}`\n"
-                                f"📝 **Tavsif:** {clean_val(desc)}\n"
-                                f"🗄 **Cabinet:** System: {clean_val(sys_cab)} | Barrier: {clean_val(bar_cab)}\n"
-                                f"🔌 **IOM / Channel:** No: {clean_val(row.get('IOM NO', '—'))} | Ch: {clean_val(row.get('CHANNEL NO', '—'))}\n"
-                                f"⚡ **Baryer:** {clean_val(bar_name)} (In: {clean_val(row.get('TB1', '—'))}, Out: {clean_val(row.get('TB2', '—'))})\n"
-                                f"🎛 **FTB (Kross):** Cab: {clean_val(ftb_cab)} | Name: {clean_val(ftb_name)} | Klema: {clean_val(ftb1)}, {clean_val(ftb2)}\n"
-                                f"🗅 **Field (JB):** Name: {clean_val(jb_name)} | Klema: {clean_val(jb_tb1)}, {clean_val(jb_tb2)}\n"
-                                f"📐 **Shkala:** {clean_val(row.get('RANGE LOW', '0'))} ~ {clean_val(row.get('RANGE HIGH', '—'))} {clean_val(row.get('ENG. UNIT', ''))}"
-                            )
-                            results.append(msg)
+                # Dynamic column mapping by clearing space and converting to uppercase
+                orig_cols = list(df.columns)
+                clean_cols = [str(c).strip().upper() for c in orig_cols]
+                df.columns = clean_cols
                 
-                # --- GDS VA PLC BAZALARI (302300 va 292300) ---
-                elif "302300" in file_upper or "292300" in file_upper:
-                    loop_col = None
-                    for col in ['Loop Name', 'LOOP NAME', 'Tag', 'TAG']:
-                        if col in df.columns:
-                            loop_col = col
-                            break
+                # Identify columns that might contain TAGs based on common keywords
+                tag_cols = []
+                for idx, col in enumerate(clean_cols):
+                    if any(kwd in col for kwd in ['TAG', 'LOOP', '1617', 'DEVICE', 'IDENTIFIER']):
+                        tag_cols.append(orig_cols[idx]) # Store the original column name case
+                
+                # If no specific tag column is matched, search across ALL columns in the sheet
+                if not tag_cols:
+                    tag_cols = orig_cols
+                
+                for actual_col in tag_cols:
+                    # Temporary series for cleaned search column to avoid mismatch
+                    clean_series = df[actual_col.strip().upper()].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
+                    matched_rows = df[clean_series.str.contains(clean_query, na=False)]
                     
-                    if loop_col:
-                        df['clean_loop_col'] = df[loop_col].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
-                        matched_rows = df[df['clean_loop_col'].str.contains(clean_query, na=False)]
-                        
+                    if not matched_rows.empty:
                         for _, row in matched_rows.iterrows():
-                            tizim_turi = "GDS" if "302300" in file_upper else "PLC"
+                            # Re-map row keys to search standard fields flexibly
+                            row_dict = {orig_cols[i]: row[clean_cols[i]] for i in range(len(orig_cols))}
                             
-                            msg = (
-                                f"🤖 **TIZIM:** {tizim_turi} ({sheet_name})\n"
-                                f"📌 **TAG:** `{clean_val(row[loop_col])}`\n"
-                                f"📝 **Asbob Nomi:** {clean_val(row.get('Instrument Name', row.get('Description', '—')))}\n"
-                                f"📡 **Signal turi:** Kirish: {clean_val(row.get('Input Signal', '—'))} | Chiqish: {clean_val(row.get('Output Signal', '—'))}\n"
-                                f"⚡ **Ta'minot (Power):** {clean_val(row.get('Input Power Supply', '—'))}\n"
-                                f"💡 **Izoh / Rejim:** {clean_val(row.get('Remarks', '—'))}"
-                            )
-                            results.append(msg)
-
-                # --- DATCHIKLAR BAZASI ---
-                elif "DATCHIK" in file_upper:
-                    for col in df.columns:
-                        df['clean_col'] = df[col].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
-                        if df['clean_col'].str.contains(clean_query, na=False).any():
-                            matched_rows = df[df['clean_col'].str.contains(clean_query, na=False)]
-                            for _, row in matched_rows.iterrows():
-                                info_lines = [f"📊 **BAZA:** `{file_name_short}` ({sheet_name})"]
-                                for c in df.columns:
-                                    if c != 'clean_col' and str(row[c]).strip() != '':
-                                        info_lines.append(f"🔹 **{c}:** {clean_val(row[c])}")
-                                results.append("\n".join(info_lines))
-                            break
+                            info_lines = [f"📊 **DATABASE:** `{file_name_short}` | **Sheet:** `{sheet_name}`"]
+                            
+                            # Extract crucial details dynamically based on contains match
+                            for key, val in row_dict.items():
+                                key_upper = str(key).upper().strip()
+                                # Skip technical clean column variables if any
+                                if 'CLEAN' in key_upper:
+                                    continue
+                                info_lines.append(f"🔹 **{key}:** {clean_val(val)}")
+                                
+                            results.append("\n".join(info_lines))
+                        break # Prevent reading duplicate rows for the same file sheet
                         
         except Exception:
             continue
             
     return list(set(results))
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    bot.reply_to(message, "Assalomu alaykum Faxriyor! KIP TAG raqamini kiriting:")
+    # Remove any existing keyboard custom menus completely
+    markup = telebot.types.ReplyKeyboardRemove(selective=False)
+    bot.reply_to(
+        message, 
+        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases (e.g., PT-1103, 21_TI_201, or LICA-10101):",
+        reply_markup=markup
+    )
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     text = message.text.strip()
+    
     if len(text) >= 3: 
-        bot.send_message(message.chat.id, "🔍 Bazadan qidirilmoqda...")
-        natijalar = search_instrument_tag(text)
-        if natijalar:
-            for natija in natijalar:
-                bot.send_message(message.chat.id, natija, parse_mode="Markdown")
+        bot.send_message(message.chat.id, "🔍 Searching databases, please wait...")
+        results = search_instrument_tag(text)
+        
+        if results:
+            for result in results:
+                bot.send_message(message.chat.id, result, parse_mode="Markdown")
         else:
-            bot.send_message(message.chat.id, f"❌ `{text}` topilmadi.")
+            bot.send_message(message.chat.id, f"❌ Match for `{text}` not found in any database. Please double-check the entry.", parse_mode="Markdown")
     else:
-        bot.send_message(message.chat.id, "⚠️ Kamida 3 ta belgi kiriting.")
+        bot.send_message(message.chat.id, "⚠️ Please enter at least 3 characters to search.")
 
 bot.infinity_polling()
