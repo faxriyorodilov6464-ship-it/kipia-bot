@@ -19,7 +19,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "Fast KIPiA Tag Finder is Running!"
+    return "KIPiA Multi-Format Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -32,7 +32,7 @@ Thread(target=run_web_server).start()
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Global memory cache for incredibly fast searching
+# Global memory cache
 CACHED_DATA = []
 
 def clean_val(val):
@@ -42,40 +42,59 @@ def clean_val(val):
     return str(val).strip()
 
 def preload_excel_databases():
-    """Load all Excel sheets into RAM once when the bot starts up"""
+    """Load all Excel formats (.xlsx and .xls) properly into RAM with dynamic header handling"""
     global CACHED_DATA
     CACHED_DATA = []
     
+    # Target both modern and older Excel formats
     files = glob.glob("*.xlsx") + glob.glob("*.xls")
     print(f"📦 Preloading databases: {files}")
     
     for file in files:
         try:
             file_name_short = os.path.basename(file)
-            excel_file = pd.ExcelFile(file)
+            
+            # Use 'xlrd' engine explicitly for older .xls files
+            if file.endswith('.xls'):
+                excel_file = pd.ExcelFile(file, engine='xlrd')
+            else:
+                excel_file = pd.ExcelFile(file)
             
             for sheet_name in excel_file.sheet_names:
                 df = excel_file.parse(sheet_name, header=None)
-                header_row = df.iloc[0] if len(df) > 1 else None
                 
-                # Cache rows for instant lookup
+                if df.empty:
+                    continue
+                
+                # Attempt to look for a row that resembles a header
+                header_row = None
+                for i in range(min(5, len(df))):
+                    row_str = "".join(df.iloc[i].astype(str).values).upper()
+                    if "TAG" in row_str or "DESCRIPTION" in row_str or "CABINET" in row_str:
+                        header_row = list(df.iloc[i])
+                        break
+                
+                if header_row is None and len(df) > 0:
+                    header_row = list(df.iloc[0])
+
+                # Process every single row into cache memory
                 for idx, row in df.iterrows():
-                    row_values = row.astype(str).values
-                    row_text_combined = "".join(row_values).upper()
+                    row_data_list = list(row)
+                    
+                    row_text_combined = "".join(row.astype(str).values).upper()
                     clean_row_text = re.sub(r'[-_\s]', '', row_text_combined)
                     
-                    # Store row matrix structures safely in memory
                     CACHED_DATA.append({
                         "clean_text": clean_row_text,
                         "file_name": file_name_short,
                         "sheet_name": sheet_name,
-                        "row_data": list(row),
-                        "header_row": list(header_row) if header_row is not None else None
+                        "row_data": row_data_list,
+                        "header_row": header_row
                     })
         except Exception as e:
             print(f"❌ Error preloading {file}: {e}")
             continue
-    print(f"✅ Successfully cached {len(CACHED_DATA)} rows.")
+    print(f"✅ Preload finished. Total rows cached: {len(CACHED_DATA)}")
 
 def search_instrument_tag_fast(search_query):
     search_query = str(search_query).strip().upper()
@@ -84,13 +103,12 @@ def search_instrument_tag_fast(search_query):
     if not CACHED_DATA:
         preload_excel_databases()
         if not CACHED_DATA:
-            return ["⚠️ Database is empty or no files found on the server!"]
+            return ["⚠️ Database files could not be read or are missing from the server."]
             
     results = []
     
     for item in CACHED_DATA:
         if clean_query in item["clean_text"]:
-            # Format results in a clean, simple, and elegant plain text layout
             info_lines = [
                 f"📊 DATABASE: {item['file_name']}",
                 f"📄 Sheet: {item['sheet_name']}",
@@ -103,10 +121,14 @@ def search_instrument_tag_fast(search_query):
                     continue
                 
                 attr_name = f"Column {col_idx + 1}"
-                if item["header_row"] is not None:
+                if item["header_row"] is not None and col_idx < len(item["header_row"]):
                     possible_label = str(item["header_row"][col_idx]).strip()
                     if possible_label and possible_label != 'nan' and possible_label != str(cell_value):
                         attr_name = possible_label
+                
+                # Remove markdown styling to keep text simple and elegant
+                attr_name = re.sub(r'[*_`\[\]]', '', attr_name)
+                val_str = re.sub(r'[*_`\[\]]', '', val_str)
                 
                 info_lines.append(f"🔹 {attr_name}: {val_str}")
             
@@ -138,7 +160,6 @@ def handle_messages(message):
         
         if results:
             for result in results:
-                # Removed parse_mode="Markdown" to ensure it uses the clean, beautiful system font
                 bot.send_message(message.chat.id, result)
         else:
             bot.send_message(message.chat.id, f"❌ Match for '{text}' not found in any database.")
