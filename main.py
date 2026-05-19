@@ -1,7 +1,7 @@
 import os
 import sys
 
-# Auto-correct working directory for Render/Pydroid
+# Auto-correct working directory for Render
 try:
     os.chdir(os.path.dirname(os.path.abspath(__file__)))
 except Exception:
@@ -19,7 +19,7 @@ app = Flask('')
 
 @app.route('/')
 def home():
-    return "KIPiA Search Bot is Running!"
+    return "Fast KIPiA Tag Finder is Running!"
 
 def run_web_server():
     port = int(os.environ.get("PORT", 8080))
@@ -32,101 +32,119 @@ Thread(target=run_web_server).start()
 BOT_TOKEN = "8896826475:AAGiRygV79dpx-iOBnoS_W8RiOZ_H-inXuk"
 bot = telebot.TeleBot(BOT_TOKEN)
 
+# Global memory cache for incredibly fast searching
+CACHED_DATA = []
+
 def clean_val(val):
     """Clean empty values or placeholders in Excel cells"""
-    if pd.isna(val) or str(val).strip() in ['-', '—', 'nan', 'N/A', 'NA', '_', '', 'nan/nan']:
+    if pd.isna(val) or str(val).strip() in ['-', '—', 'nan', 'N/A', 'NA', '_', '', 'nan/nan', 'None']:
         return "—"
     return str(val).strip()
 
-def search_instrument_tag(search_query):
-    search_query = str(search_query).strip().upper()
-    # Normalize query by removing spaces, dashes, and underscores
-    clean_query = re.sub(r'[-_\s]', '', search_query)
+def preload_excel_databases():
+    """Load all Excel sheets into RAM once when the bot starts up"""
+    global CACHED_DATA
+    CACHED_DATA = []
     
-    results = []
-    
-    # Search for all Excel files in the directory
     files = glob.glob("*.xlsx") + glob.glob("*.xls")
+    print(f"📦 Preloading databases: {files}")
     
-    if not files:
-        return ["⚠️ No Excel database files (.xlsx/.xls) found on the server!"]
-
     for file in files:
         try:
-            file_upper = file.upper()
             file_name_short = os.path.basename(file)
-            
             excel_file = pd.ExcelFile(file)
+            
             for sheet_name in excel_file.sheet_names:
-                df = excel_file.parse(sheet_name)
+                df = excel_file.parse(sheet_name, header=None)
+                header_row = df.iloc[0] if len(df) > 1 else None
                 
-                # Dynamic column mapping by clearing space and converting to uppercase
-                orig_cols = list(df.columns)
-                clean_cols = [str(c).strip().upper() for c in orig_cols]
-                df.columns = clean_cols
-                
-                # Identify columns that might contain TAGs based on common keywords
-                tag_cols = []
-                for idx, col in enumerate(clean_cols):
-                    if any(kwd in col for kwd in ['TAG', 'LOOP', '1617', 'DEVICE', 'IDENTIFIER']):
-                        tag_cols.append(orig_cols[idx]) # Store the original column name case
-                
-                # If no specific tag column is matched, search across ALL columns in the sheet
-                if not tag_cols:
-                    tag_cols = orig_cols
-                
-                for actual_col in tag_cols:
-                    # Temporary series for cleaned search column to avoid mismatch
-                    clean_series = df[actual_col.strip().upper()].astype(str).str.upper().str.replace(r'[-_\s]', '', regex=True)
-                    matched_rows = df[clean_series.str.contains(clean_query, na=False)]
+                # Cache rows for instant lookup
+                for idx, row in df.iterrows():
+                    row_values = row.astype(str).values
+                    row_text_combined = "".join(row_values).upper()
+                    clean_row_text = re.sub(r'[-_\s]', '', row_text_combined)
                     
-                    if not matched_rows.empty:
-                        for _, row in matched_rows.iterrows():
-                            # Re-map row keys to search standard fields flexibly
-                            row_dict = {orig_cols[i]: row[clean_cols[i]] for i in range(len(orig_cols))}
-                            
-                            info_lines = [f"📊 **DATABASE:** `{file_name_short}` | **Sheet:** `{sheet_name}`"]
-                            
-                            # Extract crucial details dynamically based on contains match
-                            for key, val in row_dict.items():
-                                key_upper = str(key).upper().strip()
-                                # Skip technical clean column variables if any
-                                if 'CLEAN' in key_upper:
-                                    continue
-                                info_lines.append(f"🔹 **{key}:** {clean_val(val)}")
-                                
-                            results.append("\n".join(info_lines))
-                        break # Prevent reading duplicate rows for the same file sheet
-                        
-        except Exception:
+                    # Store row matrix structures safely in memory
+                    CACHED_DATA.append({
+                        "clean_text": clean_row_text,
+                        "file_name": file_name_short,
+                        "sheet_name": sheet_name,
+                        "row_data": list(row),
+                        "header_row": list(header_row) if header_row is not None else None
+                    })
+        except Exception as e:
+            print(f"❌ Error preloading {file}: {e}")
             continue
+    print(f"✅ Successfully cached {len(CACHED_DATA)} rows.")
+
+def search_instrument_tag_fast(search_query):
+    search_query = str(search_query).strip().upper()
+    clean_query = re.sub(r'[-_\s]', '', search_query)
+    
+    if not CACHED_DATA:
+        preload_excel_databases()
+        if not CACHED_DATA:
+            return ["⚠️ Database is empty or no files found on the server!"]
+            
+    results = []
+    
+    for item in CACHED_DATA:
+        if clean_query in item["clean_text"]:
+            # Format results in a clean, simple, and elegant plain text layout
+            info_lines = [
+                f"📊 DATABASE: {item['file_name']}",
+                f"📄 Sheet: {item['sheet_name']}",
+                "———————————————"
+            ]
+            
+            for col_idx, cell_value in enumerate(item["row_data"]):
+                val_str = clean_val(cell_value)
+                if val_str == "—":
+                    continue
+                
+                attr_name = f"Column {col_idx + 1}"
+                if item["header_row"] is not None:
+                    possible_label = str(item["header_row"][col_idx]).strip()
+                    if possible_label and possible_label != 'nan' and possible_label != str(cell_value):
+                        attr_name = possible_label
+                
+                info_lines.append(f"🔹 {attr_name}: {val_str}")
+            
+            results.append("\n".join(info_lines))
             
     return list(set(results))
 
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
-    # Remove any existing keyboard custom menus completely
     markup = telebot.types.ReplyKeyboardRemove(selective=False)
     bot.reply_to(
         message, 
-        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases (e.g., PT-1103, 21_TI_201, or LICA-10101):",
+        "Welcome to Smart KIPiA Search Bot!\n\nPlease enter the KIP TAG number to search across all databases (e.g., PT-1103, LICA-10101, or II-B22303):",
         reply_markup=markup
     )
+
+@bot.message_handler(commands=['reload'])
+def manual_reload(message):
+    bot.reply_to(message, "🔄 Reloading Excel files into memory cache...")
+    preload_excel_databases()
+    bot.send_message(message.chat.id, "✅ Memory cache updated successfully!")
 
 @bot.message_handler(func=lambda message: True)
 def handle_messages(message):
     text = message.text.strip()
     
     if len(text) >= 3: 
-        bot.send_message(message.chat.id, "🔍 Searching databases, please wait...")
-        results = search_instrument_tag(text)
+        results = search_instrument_tag_fast(text)
         
         if results:
             for result in results:
-                bot.send_message(message.chat.id, result, parse_mode="Markdown")
+                # Removed parse_mode="Markdown" to ensure it uses the clean, beautiful system font
+                bot.send_message(message.chat.id, result)
         else:
-            bot.send_message(message.chat.id, f"❌ Match for `{text}` not found in any database. Please double-check the entry.", parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"❌ Match for '{text}' not found in any database.")
     else:
         bot.send_message(message.chat.id, "⚠️ Please enter at least 3 characters to search.")
 
-bot.infinity_polling()
+if __name__ == '__main__':
+    preload_excel_databases()
+    bot.infinity_polling()
