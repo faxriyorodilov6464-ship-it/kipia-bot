@@ -6,23 +6,17 @@ from telebot import TeleBot, types
 from flask import Flask
 
 # ==========================================
-# 1. FLASK VEB-SERVER (Render port xatosini yo'qotish uchun)
+# 1. FLASK VEB-SERVER (Render o'chib qolmasligi uchun)
 # ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Smart KPIA Bot is live and healthy!"
-
-def run_flask():
-    # Render o'zi beradigan PORT muhit o'zgaruvchisini majburiy o'qiymiz
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port)
+    return "Smart KPIA Bot is live and running flawlessly!"
 
 # ==========================================
-# 2. BOT TOKENINI VA EXCELNI SOZLASH
+# 2. BOT VA BAZA SOZLAMALARI
 # ==========================================
-# Siz bergan yangi va haqiqiy tokeningizni shu yerga joyladim
 TOKEN = "8896826475:AAE_Z0W7Rhm6ynHH2a0smKjTyvXjW9GlLFM"
 bot = TeleBot(TOKEN)
 
@@ -30,111 +24,111 @@ EXCEL_FILE = "Indorama IO legend.xlsx"
 db_datchiklar = {}
 
 def load_excel_data():
-    """Excel faylidagi barcha varaqlarni o'qib, umumiy bazaga yig'adi"""
+    """Excel faylidagi barcha sahifalarni aqlli skanerlash funksiyasi"""
     global db_datchiklar
     db_datchiklar.clear()
     
     if not os.path.exists(EXCEL_FILE):
-        print(f"Xatolik: '{EXCEL_FILE}' fayli topilmadi!")
+        print(f"❌ Xatolik: '{EXCEL_FILE}' fayli loyiha ichida topilmadi!")
         return
 
     try:
         xls = pd.ExcelFile(EXCEL_FILE)
         for sheet_name in xls.sheet_names:
+            # Har bir sahifani o'qiymiz
             df = xls.parse(sheet_name)
+            
+            # Ustun nomlarini tozalab, hammasini KATTA harfga o'tkazamiz
             df.columns = [str(col).strip().upper() for col in df.columns]
             
+            # Tag yozilgan ustunni qidirish (Sizning faylingizdagi variantlar)
             tag_col = None
-            for col in df.columns:
-                if "TAG" in col:
-                    tag_col = col
+            for candidate in ['FIELD TAG', 'DCS TAG', 'TAG FOR IO CARD', 'DCS TAGS', 'DSC TAG']:
+                if candidate in df.columns:
+                    tag_col = candidate
                     break
             
             if not tag_col:
-                continue
+                continue  # Agar bu sahifada datchik taglari bo'lmasa, keyingisiga o'tamiz
+
+            # Kerakli diapazon va birlik ustunlarini aniqlash
+            min_col = next((c for c in df.columns if 'RANGE  LOW' in c or 'RANGE LOW' in c), None)
+            max_col = next((c for c in df.columns if 'RANGE HIGH' in c or 'RANGE HIGH' in c or 'CALIBRATION HIGH' in c), None)
+            unit_col = next((c for c in df.columns if 'ENG. UNIT' in c or 'ENGG. UNIT' in c or 'ENG.UNIT' in c or 'UNIT' in c), None)
+            desc_col = next((c for c in df.columns if 'DESCRIPTION' in c or 'SERVICE' in c), None)
 
             for _, row in df.iterrows():
                 tag_val = str(row[tag_col]).strip()
-                if not tag_val or tag_val.lower() in ['nan', 'none', '']:
+                
+                # Bo'sh yoki keraksiz qatorlarni tashlab ketamiz
+                if not tag_val or tag_val.lower() in ['nan', 'none', '', 'spare', '-', '_']:
                     continue
                 
-                clean_tag = re.sub(r'[^A-Z0-9-]', '', tag_val.upper())
+                # Qidiruv oson bo'lishi uchun belgilarni tozalaymiz (Masalan: 21-PT-1108A -> 21PT1108A)
+                clean_tag = re.sub(r'[^A-Z0-9]', '', tag_val.upper())
                 
-                description = ""
-                for col in df.columns:
-                    if "DESC" in col or "TAVSIF" in col:
-                        description = str(row[col]).strip()
-                        break
+                # Diapazon qiymatlarini xavfsiz o'qish (Raqam bo'lsa o'qiydi, bo'lmasa None)
+                min_val, max_val = None, None
+                if min_col:
+                    try: min_val = float(str(row[min_col]).replace(",", "."))
+                    except: pass
+                if max_col:
+                    try: max_val = float(str(row[max_col]).replace(",", "."))
+                    except: pass
                 
-                min_val, max_val, unit_val = None, None, ""
-                for col in df.columns:
-                    if "MIN" in col or "LOW" in col:
-                        try: min_val = float(row[col])
-                        except: pass
-                    elif "MAX" in col or "HIGH" in col:
-                        try: max_val = float(row[col])
-                        except: pass
-                    elif "UNIT" in col or "BIRLIK" in col:
-                        unit_val = str(row[col]).strip()
+                unit_val = str(row[unit_col]).strip() if unit_col and pd.notna(row[unit_col]) else ""
+                if unit_val.lower() in ['nan', '-', 'na']: unit_val = ""
+                
+                desc_val = str(row[desc_col]).strip() if desc_col and pd.notna(row[desc_col]) else "Kiritilmagan"
+                if desc_val.lower() in ['nan', 'spare']: desc_val = "Kiritilmagan"
 
-                if min_val is None or max_val is None:
-                    for col in df.columns:
-                        if "RANGE" in col or "DIAPAZON" in col:
-                            range_text = str(row[col]).strip()
-                            match = re.findall(r"[-+]?\d*\.\d+|\d+", range_text)
-                            if len(match) >= 2:
-                                try:
-                                    min_val = float(match[0])
-                                    max_val = float(match[1])
-                                except: pass
-                            break
-
-                boshqa_malumotlar = []
-                for col in df.columns:
-                    if col not in [tag_col] and "DESC" not in col and "MIN" not in col and "MAX" not in col and "LOW" not in col and "HIGH" not in col:
-                        val = str(row[col]).strip()
-                        if val and val.lower() != 'nan':
-                            boshqa_malumotlar.append(f"<b>{col}:</b> {val}")
+                # Qo'shimcha foydali ma'lumotlarni yig'ish (IOM TYPE, MODULE NOS, CHANNEL NO)
+                extra_info = []
+                for extra_c in ['IOM TYPE', 'MODULE NOS', 'CHANNEL NO', 'IO TB']:
+                    if extra_c in df.columns and pd.notna(row[extra_c]):
+                        extra_info.append(f"<b>{extra_c}:</b> {row[extra_c]}")
 
                 db_datchiklar[clean_tag] = {
                     "original_tag": tag_val,
                     "sheet": sheet_name,
-                    "description": description if description and description.lower() != 'nan' else "Kiritilmagan",
+                    "description": desc_val,
                     "min": min_val,
                     "max": max_val,
-                    "unit": unit_val if unit_val.lower() != 'nan' else "",
-                    "extra": "\n".join(boshqa_malumotlar[:6])
+                    "unit": unit_val,
+                    "extra": "\n".join(extra_info)
                 }
-        print(f"Baza yuklandi. Jami: {len(db_datchiklar)}")
+        print(f"🚀 Baza muvaffaqiyatli yuklandi! Jami datchiklar soni: {len(db_datchiklar)}")
     except Exception as e:
-        print(f"Excel xatolik: {e}")
+        print(f"❌ Excel o'qishda xatolik yuz berdi: {e}")
 
+# Kod ishga tushganda bazani yuklaymiz
 load_excel_data()
 user_states = {}
 
 # ==========================================
-# 3. TELEGRAM BOT BUYRUQLARI
+# 3. TELEGRAM BOT FUNKSIYALARI
 # ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
         "👋 <b>Salom Faxriyor! Smart KPIA Botiga xush kelibsiz!</b>\n\n"
         "🔍 Datchik haqida ma'lumot olish uchun uning <b>Tag raqamini</b> yozing.\n"
-        "<i>Masalan: 21-PT-1108A</i>\n\n"
-        "🔄 Bazani yangilash uchun /refresh buyrug'ini yuboring."
+        "<i>Masalan: 21-PT-1108A yoki 270PDT20</i>\n\n"
+        "🔄 Excel bazasini qayta yangilash uchun: /refresh"
     )
     bot.reply_to(message, welcome_text, parse_mode="HTML")
 
 @bot.message_handler(commands=['refresh'])
 def refresh_database(message):
     load_excel_data()
-    bot.reply_to(message, f"🔄 Baza qayta yuklandi! Jami datchiklar soni: {len(db_datchiklar)}")
+    bot.reply_to(message, f"🔄 Excel bazasi qayta skner qilindi!\n🎯 Jami faol datchiklar: <b>{len(db_datchiklar)} ta</b>", parse_mode="HTML")
 
 @bot.message_handler(func=lambda message: True)
 def handle_message(message):
     chat_id = message.chat.id
     text = message.text.strip()
 
+    # Agar foydalanuvchi hisoblash rejimida bo'lsa
     if chat_id in user_states:
         state = user_states[chat_id]
         mode = state["mode"]
@@ -157,12 +151,15 @@ def handle_message(message):
                     bot.send_message(chat_id, "⚠️ Oqim qiymati 4 va 20 mA orasida bo'lishi kerak! Qaytadan kiriting:")
                     return
                 natija = ((val - 4) / 16) * (Max - Min) + Min
-                javob = f"📊 <b>Hisob natijasi:</b>\n\n🔌 Oqim: <code>{val} mA</code>\n📈 Qiymat: <b>{natija:.3f} {Unit}</b>"
+                javob = f"📊 <b>Hisob natijasi ({datchik['original_tag']}):</b>\n\n🔌 Kiritilgan oqim: <code>{val} mA</code>\n📈 Hisoblangan qiymat: <b>{natija:.3f} {Unit}</b>"
                 
             elif mode == "val_to_ma":
-                if Max - Min == 0: natija_ma = 4.0
+                if val < Min or val > Max:
+                    bot.send_message(chat_id, f"⚠️ Qiymat diapazon ichida bo'lishi kerak ({Min} - {Max})! Qaytadan kiriting:")
+                    return
+                if Max - Min == 0: nilai_ma = 4.0
                 else: nilai_ma = ((val - Min) / (Max - Min)) * 16 + 4
-                javob = f"📊 <b>Hisob natijasi:</b>\n\n📈 Qiymat: <code>{val} {Unit}</code>\n🔌 Oqim: <b>{nilai_ma:.3f} mA</b>"
+                javob = f"📊 <b>Hisob natijasi ({datchik['original_tag']}):</b>\n\n📈 Kiritilgan qiymat: <code>{val} {Unit}</code>\n🔌 Kerakli oqim: <b>{nilai_ma:.3f} mA</b>"
 
             bot.send_message(chat_id, javob, parse_mode="HTML")
             del user_states[chat_id]
@@ -174,30 +171,41 @@ def handle_message(message):
             )
             bot.send_message(chat_id, "Yana hisoblaymizmi?", reply_markup=markup)
         except ValueError:
-            bot.send_message(chat_id, "❌ Iltimos, faqat raqam kiriting:")
+            bot.send_message(chat_id, "❌ Iltimos, faqat to'g'ri raqam kiriting:")
         return
 
-    clean_text = re.sub(r'[^A-Z0-9-]', '', text.upper())
+    # Oddiy qidiruv rejimi
+    clean_text = re.sub(r'[^A-Z0-9]', '', text.upper())
 
     if clean_text in db_datchiklar:
         datchik = db_datchiklar[clean_text]
-        javob = f"📋 <b>Datchik topildi!</b>\n\n🏷 <b>Tag:</b> <code>{datchik['original_tag']}</code>\n🗂 <b>Sahifa:</b> {datchik['sheet']}\n📝 <b>Tavsif:</b> {datchik['description']}\n"
+        javob = (
+            f"📋 <b>Datchik topildi!</b>\n\n"
+            f"🏷 <b>Tag:</b> <code>{datchik['original_tag']}</code>\n"
+            f"🗂 <b>Sahifa (Sheet):</b> {datchik['sheet']}\n"
+            f"📝 <b>Tavsif (Service):</b> {datchik['description']}\n"
+        )
         
+        # Agar analog datchik bo'lsa (diapazoni bor bo'lsa)
         if datchik["min"] is not None and datchik["max"] is not None:
-            javob += f"🔢 <b>Diapazon:</b> {datchik['min']} - {datchik['max']} {datchik['unit']}\n"
-        
+            javob += f"🔢 <b>Diapazon:</b> {datchik['min']} — {datchik['max']} {datchik['unit']}\n"
+        else:
+            javob += f"🔢 <b>Diapazon:</b> Diskret datchik (Diapazon mavjud emas)\n"
+            
         if datchik["extra"]:
-            javob += f"\n⚙️ <b>Boshqa ma'lumotlar:</b>\n{datchik['extra']}"
+            javob += f"\n⚙️ <b>Texnik modullar:</b>\n{datchik['extra']}"
 
         markup = types.InlineKeyboardMarkup()
         if datchik["min"] is not None and datchik["max"] is not None:
             btn1 = types.InlineKeyboardButton("🔌 mA ➡️ Qiymat", callback_data=f"calc_ma_to_val_{clean_text}")
             btn2 = types.InlineKeyboardButton("📈 Qiymat ➡️ mA", callback_data=f"calc_val_to_ma_{clean_text}")
             markup.row(btn1, btn2)
+        else:
+            markup.row(types.InlineKeyboardButton("🔍 Yangi qidiruv", callback_data="new_search"))
         
         bot.send_message(chat_id, javob, parse_mode="HTML", reply_markup=markup)
     else:
-        bot.send_message(chat_id, f"❌ Kechirasiz, bazadan <b>{text}</b> topilmadi.", parse_mode="HTML")
+        bot.send_message(chat_id, f"❌ Kechirasiz Faxriyor, bazadan <b>{text}</b> nomli datchik topilmadi.", parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
@@ -223,9 +231,9 @@ def handle_callbacks(call):
             user_states[chat_id] = {"mode": mode, "tag": tag_key}
             
             if mode == "ma_to_val":
-                msg = f"🔌 <b>[mA ➡️ Qiymat]</b>\n\n<code>{datchik['original_tag']}</code> oqimini kiriting (4-20 mA):"
+                msg = f"🔌 <b>[mA ➡️ Qiymat]</b>\n\n<code>{datchik['original_tag']}</code> uchun oqim qiymatini yuboring (4 - 20 mA oralig'ida):"
             else:
-                msg = f"📈 <b>[Qiymat ➡️ mA]</b>\n\n<code>{datchik['original_tag']}</code> qiymatini kiriting ({datchik['min']} - {datchik['max']} {datchik['unit']}):"
+                msg = f"📈 <b>[Qiymat ➡️ mA]</b>\n\n<code>{datchik['original_tag']}</code> uchun joriy texnologik qiymatni kiriting ({datchik['min']} — {datchik['max']} {datchik['unit']}):"
             
             reply_markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
             reply_markup.add("Ortga")
@@ -233,14 +241,14 @@ def handle_callbacks(call):
         bot.answer_callback_query(call.id)
 
 # ==========================================
-# 4. SERVER VA BOTNI PARALLEL ISHGA TUSHIRISH
+# 4. SERVER VA BOTNI ISHGA TUSHIRISH
 # ==========================================
 if __name__ == "__main__":
-    # 1. Bot so'rovlarini alohida oqimda (Thread) boshlaymiz
+    # Botni parallel oqimda (Thread) yurgizamiz
     bot_thread = threading.Thread(target=bot.infinity_polling)
     bot_thread.daemon = True
     bot_thread.start()
     
-    # 2. Render kutayotgan Flask serverini yurgizamiz
+    # Flask veb-serverini Render portida ishga tushiramiz
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
