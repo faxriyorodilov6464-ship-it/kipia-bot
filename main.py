@@ -259,3 +259,4 @@ if __name__ == "__main__":
     # Render yoki boshqa serverda 24/7 ishlashi uchun poatgacha tekshiradi
     print("Bot muvaffaqiyatli ishga tushdi...")
     bot.infinity_polling()
+
