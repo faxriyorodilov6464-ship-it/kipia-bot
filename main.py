@@ -5,20 +5,25 @@ import pandas as pd
 from telebot import TeleBot, types
 from flask import Flask
 
-# 1. FLASK SERVER (Render port xatosini yo'q qilish uchun)
+# ==========================================
+# 1. FLASK VEB-SERVER (Render port xatosini yo'qotish uchun)
+# ==========================================
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "Bot is running seamlessly!"
+    return "Smart KPIA Bot is live and healthy!"
 
 def run_flask():
-    # Render avtomatik ravishda PORT muhit o'zgaruvchisini beradi, bo'lmasa 8080 portda ishlaydi
-    port = int(os.environ.get("PORT", 8080))
+    # Render o'zi beradigan PORT muhit o'zgaruvchisini majburiy o'qiymiz
+    port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# 2. BOT TOKENINI SOZLASH
-TOKEN = os.getenv("BOT_TOKEN", "7358787834:AAEbO-YourActualTokenHere")
+# ==========================================
+# 2. BOT TOKENINI VA EXCELNI SOZLASH
+# ==========================================
+# Siz bergan yangi va haqiqiy tokeningizni shu yerga joyladim
+TOKEN = "8896826475:AAE_Z0W7Rhm6ynHH2a0smKjTyvXjW9GlLFM"
 bot = TeleBot(TOKEN)
 
 EXCEL_FILE = "Indorama IO legend.xlsx"
@@ -98,19 +103,22 @@ def load_excel_data():
                     "min": min_val,
                     "max": max_val,
                     "unit": unit_val if unit_val.lower() != 'nan' else "",
-                    "extra": "\n".join(boshqa_malumotlar[:6])  # Loglarni qisqaroq chiqarish uchun limit
+                    "extra": "\n".join(boshqa_malumotlar[:6])
                 }
-        print(f"Baza muvaffaqiyatli yuklandi! Jami datchiklar: {len(db_datchiklar)}")
+        print(f"Baza yuklandi. Jami: {len(db_datchiklar)}")
     except Exception as e:
-        print(f"Excelni o'qishda xatolik: {e}")
+        print(f"Excel xatolik: {e}")
 
 load_excel_data()
 user_states = {}
 
+# ==========================================
+# 3. TELEGRAM BOT BUYRUQLARI
+# ==========================================
 @bot.message_handler(commands=['start', 'help'])
 def send_welcome(message):
     welcome_text = (
-        "👋 <b>Salom! KIPiA loyiha botiga xush kelibsiz!</b>\n\n"
+        "👋 <b>Salom Faxriyor! Smart KPIA Botiga xush kelibsiz!</b>\n\n"
         "🔍 Datchik haqida ma'lumot olish uchun uning <b>Tag raqamini</b> yozing.\n"
         "<i>Masalan: 21-PT-1108A</i>\n\n"
         "🔄 Bazani yangilash uchun /refresh buyrug'ini yuboring."
@@ -153,8 +161,8 @@ def handle_message(message):
                 
             elif mode == "val_to_ma":
                 if Max - Min == 0: natija_ma = 4.0
-                else: natija_ma = ((val - Min) / (Max - Min)) * 16 + 4
-                javob = f"📊 <b>Hisob natijasi:</b>\n\n📈 Qiymat: <code>{val} {Unit}</code>\n🔌 Oqim: <b>{natija_ma:.3f} mA</b>"
+                else: nilai_ma = ((val - Min) / (Max - Min)) * 16 + 4
+                javob = f"📊 <b>Hisob natijasi:</b>\n\n📈 Qiymat: <code>{val} {Unit}</code>\n🔌 Oqim: <b>{nilai_ma:.3f} mA</b>"
 
             bot.send_message(chat_id, javob, parse_mode="HTML")
             del user_states[chat_id]
@@ -224,11 +232,15 @@ def handle_callbacks(call):
             bot.send_message(chat_id, msg, parse_mode="HTML", reply_markup=reply_markup)
         bot.answer_callback_query(call.id)
 
+# ==========================================
+# 4. SERVER VA BOTNI PARALLEL ISHGA TUSHIRISH
+# ==========================================
 if __name__ == "__main__":
-    # Veb-serverni alohida treda (o'zaro parallel) ishga tushiramiz
-    flask_thread = threading.Thread(target=run_flask)
-    flask_thread.daemon = True
-    flask_thread.start()
+    # 1. Bot so'rovlarini alohida oqimda (Thread) boshlaymiz
+    bot_thread = threading.Thread(target=bot.infinity_polling)
+    bot_thread.daemon = True
+    bot_thread.start()
     
-    # Bot pollingini ishga tushiramiz
-    bot.infinity_polling()
+    # 2. Render kutayotgan Flask serverini yurgizamiz
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port)
