@@ -4,7 +4,7 @@ import pandas as pd
 import telebot
 from flask import Flask
 
-# 1. Flask veb-serverini yaratamiz (Render port xatoligi bermasligi uchun)
+# 1. Flask veb-serverini yaratamiz
 app = Flask(__name__)
 
 @app.route('/')
@@ -12,12 +12,15 @@ def home():
     return "Bot muvaffaqiyatli ishlamoqda!"
 
 def run_flask():
-    # Render avtomatik ravishda PORT muhit o'zgaruvchisini beradi
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port)
 
-# 2. Telegram Botni sozlaymiz
-TOKEN = os.environ.get('BOT_TOKEN', 'Sizning_Bot_Tokeningiz_Bu_Yerga')
+# 2. Telegram Botni sozlaymiz (PROBEL MUAMMOSINI SHU YERDA KOD BILAN TUZATAMIZ)
+RAW_TOKEN = os.environ.get('BOT_TOKEN', '8896826475:AAE_Z0W7Rhm6ynHH2a0smKjTyvXjW9GlLFM')
+
+# Token boshidagi, oxiridagi va ichidagi barcha ko'rinmas bo'shliqlarni o'chirib tashlaymiz
+TOKEN = "".join(RAW_TOKEN.split()).strip()
+
 bot = telebot.TeleBot(TOKEN)
 
 EXCEL_FILE = 'Indorama IO legend.xlsx'
@@ -77,7 +80,6 @@ def handle_search(message):
 
 # 3. Server va Botni parallel ravishda ishga tushiramiz
 if __name__ == '__main__':
-    # Flask serverini alohida oqimda (thread) ishga tushiramiz
     flask_thread = threading.Thread(target=run_flask)
     flask_thread.daemon = True
     flask_thread.start()
