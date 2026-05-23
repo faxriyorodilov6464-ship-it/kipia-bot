@@ -4,7 +4,7 @@ import pandas as pd
 import telebot
 from flask import Flask
 
-# 1. Flask veb-serverini yaratamiz (Render o'chib qolmasligi uchun)
+# 1. Flask veb-serverini yaratamiz
 app = Flask(__name__)
 
 @app.route('/')
@@ -21,10 +21,17 @@ TOKEN = "".join(RAW_TOKEN.split()).strip()
 
 bot = telebot.TeleBot(TOKEN)
 
-EXCEL_FILE = 'Indorama IO legend.xlsx'
+# FAILDAN ADASHMASLIK UCHUN MUTLOQ MANZILNI ANIQLAYMIZ
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+EXCEL_FILE = os.path.join(BASE_DIR, 'Indorama IO legend.xlsx')
 
 def search_sensor_in_excel(query):
     try:
+        # Fayl mavjudligini tekshiramiz
+        if not os.path.exists(EXCEL_FILE):
+            print(f"Xatolik: {EXCEL_FILE} topilmadi!")
+            return None
+            
         # Excel faylni to'liq o'qiymiz
         df = pd.read_excel(EXCEL_FILE, dtype=str)
         
@@ -35,9 +42,9 @@ def search_sensor_in_excel(query):
         clean_query = "".join(c for c in query if c.isalnum()).lower()
         
         if not clean_query:
-            return None
+            return pd.DataFrame()
             
-        # Excel'dagi barcha ustunlar bo'ylab qidiramiz (istalgan ustundan topa oladi)
+        # Excel'dagi barcha ustunlar bo'ylab qidiramiz
         for column in df.columns:
             # Ustundagi qiymatlarni tozalab solishtiramiz
             clean_tags = df[column].astype(str).apply(lambda val: "".join(c for c in val if c.isalnum()).lower())
@@ -55,14 +62,14 @@ def search_sensor_in_excel(query):
                 flex_tags = clean_tags.str.replace('l', 'i')
                 matched_rows = df[flex_tags == flex_query]
                 
-            # Agar ushbu ustundan ma'lumot topilsa, natijani qaytaramiz va qidiruvni to'xtatamiz
+            # Agar ma'lumot topilsa, natijani qaytaramiz
             if not matched_rows.empty:
                 return matched_rows
                 
-        return pd.DataFrame() # Agar hech qaysi ustundan topilmasa, bo'sh qaytaradi
+        return pd.DataFrame()
         
     except Exception as e:
-        print(f"Excelni o'qishda xatolik: {e}")
+        print(f"Excelni o'qishda xatolik yuz berdi: {e}")
         return None
 
 @bot.message_handler(commands=['start', 'help'])
@@ -76,9 +83,7 @@ def send_welcome(message):
 
 @bot.message_handler(func=lambda message: True)
 def handle_search(message):
-    user_text = message.text # <--- Foydalanuvchi aynan nima yozsa, o'shani oladi!
-    
-    # Exceldan qidirish funksiyasiga foydalanuvchi matnini uzatamiz
+    user_text = message.text
     results = search_sensor_in_excel(user_text)
     
     if results is None:
@@ -87,7 +92,7 @@ def handle_search(message):
 
     if not results.empty:
         row = results.iloc[0]
-        response = f"✅ **Ma'lumot topildi! (Siz yozgan so'rov: {user_text})**\n"
+        response = f"✅ **Ma'lumot topildi!**\n"
         response += "-------------------------\n"
         
         # Excel'dagi barcha ustunlarni ketma-ket chiqarish
