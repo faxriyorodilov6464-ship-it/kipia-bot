@@ -1,4 +1,2 @@
-pyTelegramBotAPI
-Flask
-pandas
-openpyxl
+pip install pandas openpyxl python-telegram-bot
+python main.py
